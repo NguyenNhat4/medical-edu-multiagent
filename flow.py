@@ -1,16 +1,18 @@
 from pocketflow import Flow
-from nodes import GetQuestionNode, AnswerNode
+from nodes import InterviewerNode, PlannerNode, RefinerNode, ContentGeneratorBatchNode
 
-def create_qa_flow():
-    """Create and return a question-answering flow."""
-    # Create nodes
-    get_question_node = GetQuestionNode()
-    answer_node = AnswerNode()
+def create_medical_agent_flow():
+    interviewer = InterviewerNode()
+    planner = PlannerNode()
+    refiner = RefinerNode()
+    generator = ContentGeneratorBatchNode()
     
-    # Connect nodes in sequence
-    get_question_node >> answer_node
+    # Connections
+    interviewer >> planner
+    planner >> refiner
     
-    # Create flow starting with input node
-    return Flow(start=get_question_node)
+    # Branching
+    refiner - "revise" >> planner
+    refiner - "approved" >> generator
 
-qa_flow = create_qa_flow()
+    return Flow(start=interviewer)
