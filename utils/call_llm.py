@@ -5,14 +5,14 @@ load_dotenv()
 def call_llm(prompt, system_prompt=None):
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "your-api-key"))
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    
+    # Gemini API uses system_instruction parameter for system prompts
+    config = {"system_instruction": system_prompt} if system_prompt else {}
 
     response = client.models.generate_content(
         model=model,
-        contents=[prompt]
+        contents=[prompt],
+        config=config
     )
     return response.text
     
