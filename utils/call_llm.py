@@ -1,19 +1,20 @@
-from openai import OpenAI
+from google import genai
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 def call_llm(prompt, system_prompt=None):
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "your-api-key"))
-
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "your-api-key"))
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    r = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages
+    response = client.models.generate_content(
+        model=model,
+        contents=[prompt]
     )
-    return r.choices[0].message.content
+    return response.text
     
 if __name__ == "__main__":
     prompt = "What is the meaning of life?"
