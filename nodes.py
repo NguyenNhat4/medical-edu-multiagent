@@ -1,11 +1,11 @@
-from pocketflow import Node, BatchNode
+from pocketflow import Node
 from utils.call_llm import call_llm
 import yaml
 import json
 
 class InterviewerNode(Node):
     def prep(self, shared):
-        return shared.get("history", [])
+        return shared.get("chat_history", [])
 
     def exec(self, history):
         # Convert history to string for prompt
