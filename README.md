@@ -24,3 +24,31 @@ This is a project template for Agentic Coding with [Pocket Flow](https://github.
   - Check out the [Agentic Coding Guidance](https://the-pocket.github.io/PocketFlow/guide.html)
     
   - Check out the [YouTube Tutorial](https://www.youtube.com/@ZacharyLLM?sub_confirmation=1)
+
+# Medical Training Multi-Agent System
+
+A specialized agentic system for generating medical training materials (Lectures, Slides, Notes) using PocketFlow.
+
+## Features
+- **Structured Workflow**: Interview -> Plan -> Refine -> Generate.
+- **Dynamic Artifacts**: Generates only the requested documents (e.g., just Slides or full package).
+- **Parallel Generation**: Uses Batch Nodes to generate content concurrently.
+- **Language**: Fully Vietnamese support.
+
+## Usage
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Set API Key:
+   ```bash
+   export OPENAI_API_KEY="sk-..."
+   ```
+3. Run the agent:
+   ```bash
+   python main.py
+   ```
+
+## Architecture
+See `docs/design.md` for details.
