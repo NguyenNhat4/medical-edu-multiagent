@@ -57,13 +57,45 @@ requirements:
 
 class PlannerNode(Node):
     def prep(self, shared):
-        return shared.get("requirements", {})
+        return {
+            "reqs": shared.get("requirements", {}),
+            "current_blueprint": shared.get("blueprint", []),
+            "feedback": shared.get("planner_feedback", "")
+        }
 
-    def exec(self, reqs):
+    def exec(self, inputs):
+        reqs = inputs.get("reqs", {})
+        current_blueprint = inputs.get("current_blueprint", [])
+        feedback = inputs.get("feedback", "")
+
         if not reqs:
             return {"blueprint": []}
 
-        prompt = f"""
+        if feedback:
+            prompt = f"""
+Bạn là chuyên gia soạn bài giảng y khoa.
+Nhiệm vụ: Cập nhật dàn ý bài giảng dựa trên yêu cầu chỉnh sửa của người dùng.
+Bạn có thể thêm, bớt hoặc sửa đổi các slide nếu cần thiết.
+
+Thông tin bài giảng:
+Topic: {reqs.get('topic')}
+Audience: {reqs.get('audience')}
+Objectives: {reqs.get('objectives')}
+
+Dàn ý hiện tại:
+{yaml.dump(current_blueprint, allow_unicode=True)}
+
+Yêu cầu chỉnh sửa: "{feedback}"
+
+Output YAML list mới (Cập nhật hoàn chỉnh):
+```yaml
+blueprint:
+  - title: "..."
+    description: "..."
+```
+"""
+        else:
+            prompt = f"""
 Lập dàn ý bài giảng (Blueprint) cho:
 Topic: {reqs.get('topic')}
 Audience: {reqs.get('audience')}
