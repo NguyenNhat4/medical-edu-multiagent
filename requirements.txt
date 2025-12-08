@@ -3,3 +3,4 @@ openai
 PyYAML
 streamlit
 python-pptx
+python-docx

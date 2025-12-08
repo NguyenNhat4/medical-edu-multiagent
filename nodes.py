@@ -14,7 +14,12 @@ class InterviewerNode(Node):
 
         prompt = f"""
 Bạn là Trợ lý Y khoa (Medical Agent).
-Nhiệm vụ: Hỏi để làm rõ yêu cầu về: Chủ đề (Topic), Đối tượng (Audience), Mục tiêu (Objectives).
+Nhiệm vụ: Hỏi để làm rõ yêu cầu về:
+1. Chủ đề (Topic)
+2. Đối tượng (Audience)
+3. Mục tiêu (Objectives)
+4. Định dạng tài liệu (Outputs): Slide (PPTX) hay Tài liệu chi tiết (DOCX) hoặc cả hai?
+
 Nếu ĐÃ ĐỦ thông tin: status='done'.
 Nếu CHƯA ĐỦ: status='ask', đặt câu hỏi ngắn gọn.
 
@@ -29,6 +34,7 @@ requirements:
   topic: "..."
   audience: "..."
   objectives: "..."
+  outputs: ["slide", "doc"] # List các định dạng
 ```
 """
         try:
@@ -57,9 +63,14 @@ requirements:
 
 class PlannerNode(Node):
     def prep(self, shared):
-        return shared.get("requirements", {})
+        reqs = shared.get("requirements", {})
+        feedback = shared.get("plan_feedback", None)
+        return {"reqs": reqs, "feedback": feedback}
 
-    def exec(self, reqs):
+    def exec(self, inputs):
+        reqs = inputs.get("reqs", {})
+        feedback = inputs.get("feedback")
+
         if not reqs:
             return {"blueprint": []}
 
@@ -68,7 +79,13 @@ Lập dàn ý bài giảng (Blueprint) cho:
 Topic: {reqs.get('topic')}
 Audience: {reqs.get('audience')}
 Objectives: {reqs.get('objectives')}
+Outputs: {reqs.get('outputs')}
 
+"""
+        if feedback:
+            prompt += f"\nLƯU Ý QUAN TRỌNG: Người dùng yêu cầu sửa đổi dàn ý trước đó như sau: '{feedback}'. Hãy điều chỉnh lại cấu trúc cho phù hợp."
+
+        prompt += """
 Output YAML list:
 ```yaml
 blueprint:
@@ -96,6 +113,12 @@ blueprint:
             shared["blueprint"] = exec_res.get("blueprint", [])
         else:
             shared["blueprint"] = []
+        # Clear feedback after processing so it doesn't persist forever if we loop back differently
+        # But for 'Regenerate', we might want to keep it until confirmed.
+        # Actually, app.py sets it. We can clear it here or let app.py manage it.
+        # Let's clear it to be safe.
+        if "plan_feedback" in shared:
+            del shared["plan_feedback"]
         return "default"
 
 class ResearcherNode(Node):
@@ -158,8 +181,8 @@ class ContentWriterNode(Node):
 
         prompt = f"""
 Vai trò: Content Writer.
-Nhiệm vụ: Viết nội dung cho slide dựa trên research.
-Slide Title: "{item.get('title')}"
+Nhiệm vụ: Viết nội dung chi tiết.
+Topic: "{item.get('title')}"
 Research: {inputs['notes']}
 
 Output YAML:
@@ -189,7 +212,6 @@ slide:
         if idx is not None:
             if "slides_data" not in shared:
                 shared["slides_data"] = {}
-            # Ensure exec_res is a dict and has 'slide'
             if isinstance(exec_res, dict) and "slide" in exec_res:
                 shared["slides_data"][idx] = exec_res["slide"]
             else:
@@ -199,7 +221,6 @@ slide:
 class PPTGeneratorNode(Node):
     def prep(self, shared):
         data = shared.get("slides_data", {})
-        # Sort by index keys to ensure order
         sorted_keys = sorted(data.keys())
         sorted_slides = [data[k] for k in sorted_keys]
 
@@ -222,5 +243,33 @@ class PPTGeneratorNode(Node):
             return None
 
     def post(self, shared, prep_res, filename):
-        shared["output_file"] = filename
+        shared["pptx_file"] = filename
+        return "default"
+
+class DocGeneratorNode(Node):
+    def prep(self, shared):
+        data = shared.get("slides_data", {})
+        sorted_keys = sorted(data.keys())
+        sorted_slides = [data[k] for k in sorted_keys]
+
+        reqs = shared.get("requirements", {})
+        topic = reqs.get("topic", "document") if reqs else "document"
+        return {"content": sorted_slides, "topic": topic}
+
+    def exec(self, inputs):
+        from utils.doc_gen import generate_doc
+        import os
+
+        os.makedirs("output", exist_ok=True)
+        filename = f"output/{inputs['topic'].replace(' ', '_')}.docx"
+
+        try:
+            generate_doc(inputs["content"], filename, inputs["topic"])
+            return filename
+        except Exception as e:
+            print(f"Doc Generation Error: {e}")
+            return None
+
+    def post(self, shared, prep_res, filename):
+        shared["docx_file"] = filename
         return "default"
