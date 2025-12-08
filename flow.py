@@ -1,18 +1,17 @@
 from pocketflow import Flow
-from nodes import InterviewerNode, PlannerNode, RefinerNode, ContentGeneratorBatchNode
+from nodes import InterviewerNode, PlannerNode, ContentGeneratorBatchNode
 
-def create_medical_agent_flow():
-    interviewer = InterviewerNode()
+def create_interview_flow():
+    """Flow for gathering requirements (Single turn)."""
+    node = InterviewerNode()
+    return Flow(start=node)
+
+def create_execution_flow():
+    """Flow for planning and generating content."""
     planner = PlannerNode()
-    refiner = RefinerNode()
     generator = ContentGeneratorBatchNode()
     
-    # Connections
-    interviewer >> planner
-    planner >> refiner
+    # Connect Planner to Generator
+    planner >> generator
     
-    # Branching
-    refiner - "revise" >> planner
-    refiner - "approved" >> generator
-
-    return Flow(start=interviewer)
+    return Flow(start=planner)

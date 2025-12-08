@@ -1,175 +1,171 @@
 import streamlit as st
-import time
-import os
-from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, PPTGeneratorNode
+import json
+from nodes import InterviewerNode, PlannerNode, ContentGeneratorBatchNode
+from utils.db import get_db_connection, init_db, log_message
 
 # Page Config
-st.set_page_config(page_title="Trợ lý Bài giảng Y khoa", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="Medical Agent", layout="wide")
 
-# Session State Init
-if "stage" not in st.session_state:
-    st.session_state.stage = "interview" # interview, plan, executing, done
+# Init DB
+if "db_conn" not in st.session_state:
+    st.session_state.db_conn = get_db_connection()
+    init_db(st.session_state.db_conn)
+
+# Init State
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn bài giảng về chủ đề gì?"}]
-if "shared" not in st.session_state:
-    st.session_state.shared = {
-        "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn bài giảng về chủ đề gì?"}],
-        "requirements": {},
-        "blueprint": [],
-        "research_data": {},
-        "slides_data": {}
-    }
+    st.session_state.messages = [] # Chat history
+if "app_state" not in st.session_state:
+    st.session_state.app_state = "interview" # interview, confirm, execution, result
+if "requirements" not in st.session_state:
+    st.session_state.requirements = {}
 
-# --- STAGE 1: INTERVIEW ---
-if st.session_state.stage == "interview":
-    st.title("🏥 Trợ lý Y khoa AI - Thu thập yêu cầu")
+def reset_app():
+    st.session_state.messages = []
+    st.session_state.app_state = "interview"
+    st.session_state.requirements = {}
+    st.rerun()
+
+# Sidebar
+with st.sidebar:
+    st.title("Medical Training Agent")
+    st.markdown("---")
+    if st.button("Reset Conversation"):
+        reset_app()
+
+    st.markdown("### Debug Info")
+    st.caption(f"State: {st.session_state.app_state}")
+    if st.session_state.requirements:
+        st.caption("Requirements:")
+        st.json(st.session_state.requirements)
+
+# --- INTERVIEW PHASE ---
+if st.session_state.app_state == "interview":
+    st.subheader("Gathering Requirements (Thu thập yêu cầu)")
 
     # Display Chat
     for msg in st.session_state.messages:
-        role = "user" if msg["role"] == "user" else "assistant"
-        with st.chat_message(role):
-            st.write(msg["content"])
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    # Input
-    if prompt := st.chat_input("Nhập yêu cầu của bạn..."):
-        # User turn
+    # Chat Input
+    if prompt := st.chat_input("Mô tả nhu cầu đào tạo của bạn... (Ví dụ: Tạo bài giảng về Tim mạch cho sinh viên)"):
+        # User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.session_state.shared["chat_history"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.write(prompt)
+            st.markdown(prompt)
 
-        # Agent turn
-        with st.chat_message("assistant"):
-            with st.spinner("Đang suy nghĩ..."):
-                interviewer = InterviewerNode()
-                # Run the node
-                # Note: node.run(shared) returns the action string (e.g., "default")
-                # But inside the node, it updates shared["interview_result"]
-                try:
-                    interviewer.run(st.session_state.shared)
-                except Exception as e:
-                    st.error(f"Lỗi hệ thống: {e}")
-                    st.stop()
+        # Log to DB
+        log_message(st.session_state.db_conn, "USER_INPUT", prompt)
 
-                result = st.session_state.shared.get("interview_result", {})
-                status = result.get("status", "ask")
-                message = result.get("message", "...")
+        # Agent Logic
+        with st.spinner("Agent đang suy nghĩ..."):
+            # Prepare shared store
+            # InterviewerNode expects 'history'
+            shared = {"history": st.session_state.messages, "requirements": {}}
 
-                st.write(message)
-                st.session_state.messages.append({"role": "agent", "content": message})
-                st.session_state.shared["chat_history"].append({"role": "agent", "content": message})
+            # Run Node directly (Single Turn)
+            interviewer = InterviewerNode()
+            action = interviewer.run(shared)
 
-                if status == "done":
-                    st.success("Đã hiểu yêu cầu! Chuyển sang lập kế hoạch...")
-                    time.sleep(1)
-                    st.session_state.stage = "plan"
-                    st.rerun()
+            # Process Response
+            last_resp = shared.get("last_agent_response", {})
 
-# --- STAGE 2: PLAN ---
-elif st.session_state.stage == "plan":
-    st.title("📋 Kế hoạch bài giảng (Blueprint)")
-
-    reqs = st.session_state.shared.get("requirements", {})
-    st.info(f"**Chủ đề:** {reqs.get('topic')}\n\n**Đối tượng:** {reqs.get('audience')}\n\n**Mục tiêu:** {reqs.get('objectives')}")
-
-    if not st.session_state.shared.get("blueprint"):
-        with st.spinner("Đang lập dàn ý..."):
-            planner = PlannerNode()
-            try:
-                planner.run(st.session_state.shared)
-            except Exception as e:
-                st.error(f"Lỗi lập dàn ý: {e}")
-
-            # If blueprint is still empty, retry or show error
-            if not st.session_state.shared.get("blueprint"):
-                st.warning("Không tạo được dàn ý. Vui lòng thử lại.")
-            else:
+            if action == "done":
+                st.session_state.requirements = shared["requirements"]
+                st.session_state.app_state = "confirm"
                 st.rerun()
+            else:
+                # Ask question
+                question = last_resp.get("question", "Tôi cần thêm thông tin.")
+                st.session_state.messages.append({"role": "assistant", "content": question})
+                with st.chat_message("assistant"):
+                    st.markdown(question)
 
-    blueprint = st.session_state.shared.get("blueprint", [])
+# --- CONFIRM PHASE ---
+elif st.session_state.app_state == "confirm":
+    st.subheader("Xác nhận yêu cầu (Confirmation)")
+    st.info("Vui lòng kiểm tra thông tin dưới đây trước khi tạo tài liệu.")
 
-    st.write("### Dàn ý đề xuất:")
-
-    new_blueprint = []
-    # Use index to make unique keys
-    for i, item in enumerate(blueprint):
-        with st.expander(f"Slide {i+1}: {item.get('title')}", expanded=True):
-            title = st.text_input("Tiêu đề", item.get('title'), key=f"title_{i}")
-            desc = st.text_area("Mô tả / Nội dung", item.get('description'), key=f"desc_{i}")
-            new_blueprint.append({"title": title, "description": desc})
+    reqs = st.session_state.requirements
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("✅ Xác nhận & Tạo bài giảng", type="primary"):
-            st.session_state.shared["blueprint"] = new_blueprint
-            st.session_state.stage = "executing"
-            st.rerun()
-
+        st.text_input("Chủ đề (Topic)", value=reqs.get("topic", ""), disabled=True)
+        st.text_input("Đối tượng (Audience)", value=reqs.get("audience", ""), disabled=True)
     with col2:
-        if st.button("🔄 Lập lại dàn ý"):
-            st.session_state.shared["blueprint"] = []
-            st.rerun()
+        artifacts = reqs.get("artifacts", [])
+        if not isinstance(artifacts, list): artifacts = [artifacts]
+        st.multiselect("Tài liệu cần tạo (Artifacts)", options=["lecture", "slide", "note", "student"], default=artifacts, disabled=True)
 
-# --- STAGE 3: EXECUTION ---
-elif st.session_state.stage == "executing":
-    st.title("⚙️ Đang khởi tạo nội dung...")
-
-    blueprint = st.session_state.shared.get("blueprint", [])
-    total_steps = len(blueprint)
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    researcher = ResearcherNode()
-    writer = ContentWriterNode()
-
-    # Run Batch
-    for i, item in enumerate(blueprint):
-        status_text.text(f"Đang xử lý Slide {i+1}/{total_steps}: {item['title']}...")
-
-        # 1. Research
-        researcher.set_params({"index": i})
-        researcher.run(st.session_state.shared)
-
-        # 2. Write
-        writer.set_params({"index": i})
-        writer.run(st.session_state.shared)
-
-        progress_bar.progress((i + 1) / total_steps)
-
-    status_text.text("Đang tạo file PPTX...")
-    ppt_gen = PPTGeneratorNode()
-    ppt_gen.run(st.session_state.shared)
-
-    st.session_state.stage = "done"
-    st.rerun()
-
-# --- STAGE 4: DONE ---
-elif st.session_state.stage == "done":
-    st.title("✅ Hoàn tất!")
-    st.balloons()
-
-    filename = st.session_state.shared.get("output_file")
-
-    if filename and os.path.exists(filename):
-        with open(filename, "rb") as f:
-            st.download_button(
-                label="📥 Tải xuống Slide (.pptx)",
-                data=f,
-                file_name=os.path.basename(filename),
-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            )
-
-    st.write("### Nội dung chi tiết:")
-    slides_data = st.session_state.shared.get("slides_data", {})
-    sorted_keys = sorted(slides_data.keys())
-    for k in sorted_keys:
-        slide = slides_data[k]
-        with st.expander(f"{slide.get('title')}"):
-            st.write(slide.get('content'))
-            st.caption(f"Note: {slide.get('speaker_notes')}")
-
-    if st.button("Làm bài mới"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+    st.markdown("---")
+    c1, c2 = st.columns([1, 4])
+    if c1.button("Đồng ý & Tạo (Approve)"):
+        st.session_state.app_state = "execution"
         st.rerun()
+
+    if c2.button("Sửa lại (Modify)"):
+        st.warning("Hệ thống sẽ reset hội thoại để bạn nhập lại yêu cầu.")
+        reset_app()
+
+# --- EXECUTION PHASE ---
+elif st.session_state.app_state == "execution":
+    st.subheader("Đang tạo tài liệu (Generating Content)...")
+
+    progress_bar = st.progress(0, text="Khởi động Agents...")
+
+    shared = {
+        "requirements": st.session_state.requirements,
+        "history": st.session_state.messages
+    }
+
+    # Run Flow Logic manually to update progress
+    try:
+        # Planner
+        progress_bar.progress(20, text="Planner Agent: Đang lập dàn ý (Planning)...")
+        log_message(st.session_state.db_conn, "SYSTEM", "Starting Planner")
+
+        planner = PlannerNode()
+        planner.run(shared)
+
+        # Generator
+        progress_bar.progress(50, text="Sub-Agents: Đang viết nội dung chi tiết...")
+        log_message(st.session_state.db_conn, "SYSTEM", "Starting Generator Batch")
+
+        generator = ContentGeneratorBatchNode()
+        generator.run(shared)
+
+        progress_bar.progress(100, text="Hoàn tất!")
+
+        # Store results
+        st.session_state.results = shared.get("generated_content", {})
+        st.session_state.plan_outline = shared.get("plan_outline", "")
+        st.session_state.app_state = "result"
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Đã xảy ra lỗi: {e}")
+        log_message(st.session_state.db_conn, "ERROR", str(e))
+        st.exception(e)
+
+# --- RESULT PHASE ---
+elif st.session_state.app_state == "result":
+    st.subheader("Kết quả (Final Artifacts)")
+    st.success("Đã tạo xong tài liệu!")
+
+    with st.expander("Xem Dàn ý (Plan Outline)"):
+        st.markdown(st.session_state.plan_outline)
+
+    results = st.session_state.results
+    if results:
+        tabs = st.tabs(list(results.keys()))
+
+        for i, (key, content) in enumerate(results.items()):
+            with tabs[i]:
+                st.markdown(content)
+                st.download_button(f"Download {key}.md", content, file_name=f"{key}.md")
+    else:
+        st.warning("Không có nội dung nào được tạo.")
+
+    st.markdown("---")
+    if st.button("Bắt đầu phiên mới"):
+        reset_app()

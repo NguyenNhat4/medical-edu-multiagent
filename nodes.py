@@ -1,226 +1,158 @@
 from pocketflow import Node
 from utils.call_llm import call_llm
 import yaml
+import json
 
 class InterviewerNode(Node):
     def prep(self, shared):
         return shared.get("chat_history", [])
 
     def exec(self, history):
-        history_text = ""
-        for msg in history:
-            role = "User" if msg['role'] == "user" else "Agent"
-            history_text += f"{role}: {msg['content']}\n"
+        # Convert history to string for prompt
+        history_str = json.dumps(history, ensure_ascii=False)
 
         prompt = f"""
-Bạn là Trợ lý Y khoa (Medical Agent).
-Nhiệm vụ: Hỏi để làm rõ yêu cầu về: Chủ đề (Topic), Đối tượng (Audience), Mục tiêu (Objectives).
-Nếu ĐÃ ĐỦ thông tin: status='done'.
-Nếu CHƯA ĐỦ: status='ask', đặt câu hỏi ngắn gọn.
+Bạn là một trợ lý ảo hỗ trợ xây dựng bài giảng y khoa (Medical Agent).
+Mục tiêu: Thu thập đầy đủ thông tin từ người dùng.
 
-Hội thoại:
-{history_text}
+Các thông tin bắt buộc cần có:
+1. Chủ đề (Topic)
+2. Đối tượng người nghe (Audience) - Sinh viên Y, Bác sĩ nội trú, hay Bệnh nhân?
+3. Các tài liệu cần tạo (Artifacts). Chỉ chấp nhận các loại sau (có thể chọn nhiều):
+   - "lecture" (Bài giảng chi tiết)
+   - "slide" (Nội dung Slide)
+   - "note" (Ghi chú giảng viên)
+   - "student" (Tài liệu ôn tập cho sinh viên)
 
-Output YAML:
+Lịch sử hội thoại:
+{history_str}
+
+Nhiệm vụ:
+- Phân tích hội thoại.
+- Nếu ĐÃ ĐỦ thông tin: Trả về status "done" và requirements.
+- Nếu CHƯA ĐỦ: Trả về status "ask" và câu hỏi tiếp theo.
+
+OUTPUT FORMAT: REQUIRED YAML (No Markdown, pure YAML)
 ```yaml
-status: ask  # or done
-message: "..."
-requirements:
+status: done # or ask
+question: "Câu hỏi của bạn..." # null if done
+requirements: # null if ask
   topic: "..."
   audience: "..."
-  objectives: "..."
+  artifacts: ["lecture", "slide"]
 ```
 """
-        try:
-            response = call_llm(prompt)
-            # Basic cleaning
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-
-            return yaml.safe_load(clean)
-        except Exception as e:
-            print(f"Error parsing YAML: {e}")
-            return {"status": "ask", "message": "Có lỗi xử lý, vui lòng nhắc lại."}
+        return call_llm(prompt)
 
     def post(self, shared, prep_res, exec_res):
-        if not isinstance(exec_res, dict):
-             exec_res = {"status": "ask", "message": "Lỗi định dạng phản hồi."}
+        # Clean response
+        clean_res = exec_res.replace("```yaml", "").replace("```", "").strip()
+        try:
+            data = yaml.safe_load(clean_res)
+        except Exception as e:
+            print(f"Error parsing YAML: {e}\nRaw: {exec_res}")
+            # Fallback
+            data = {"status": "ask", "question": "Xin lỗi, tôi gặp lỗi hệ thống. Bạn có thể nhắc lại không?"}
 
-        shared["interview_result"] = exec_res
-        if exec_res.get("status") == "done":
-            shared["requirements"] = exec_res.get("requirements")
-        return "default"
+        shared["last_agent_response"] = data
+
+        if data.get("status") == "done":
+            shared["requirements"] = data.get("requirements")
+            return "done"
+        else:
+            return "ask"
 
 class PlannerNode(Node):
     def prep(self, shared):
         return shared.get("requirements", {})
 
-    def exec(self, reqs):
-        if not reqs:
-            return {"blueprint": []}
-
+    def exec(self, requirements):
         prompt = f"""
-Lập dàn ý bài giảng (Blueprint) cho:
-Topic: {reqs.get('topic')}
-Audience: {reqs.get('audience')}
-Objectives: {reqs.get('objectives')}
+Dựa trên yêu cầu sau, hãy lập một Dàn ý (Outline) chi tiết cho bài giảng y khoa.
+Phân chia task cụ thể cho các sub-agents.
 
-Output YAML list:
+Input Requirements:
+{json.dumps(requirements, ensure_ascii=False)}
+
+OUTPUT FORMAT: REQUIRED YAML
 ```yaml
-blueprint:
-  - title: "..."
-    description: "..."
-  - title: "..."
-    description: "..."
+outline: |
+  # Tiêu đề bài giảng
+  ## Phần 1...
+  ## Phần 2...
+subtasks:
+  - title: "Soạn bài giảng chi tiết"
+    description: "Viết nội dung đầy đủ..."
+  - title: "Soạn nội dung Slide"
+    description: "Tóm tắt ý chính..."
 ```
 """
+        return call_llm(prompt)
+
+    def post(self, shared, prep_res, exec_res):
+        clean_res = exec_res.replace("```yaml", "").replace("```", "").strip()
         try:
-            response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            return yaml.safe_load(clean)
+            data = yaml.safe_load(clean_res)
+            shared["plan_outline"] = data.get("outline", "")
+            shared["subtasks"] = data.get("subtasks", [])
         except Exception as e:
-            print(f"Error parsing YAML: {e}")
-            return {"blueprint": []}
-
-    def post(self, shared, prep_res, exec_res):
-        if isinstance(exec_res, dict):
-            shared["blueprint"] = exec_res.get("blueprint", [])
-        else:
-            shared["blueprint"] = []
+            print(f"Error parsing Plan YAML: {e}")
+            shared["plan_outline"] = exec_res
+            shared["subtasks"] = []
         return "default"
 
-class ResearcherNode(Node):
+class ContentGeneratorBatchNode(BatchNode):
     def prep(self, shared):
-        idx = self.params.get("index")
-        if idx is not None and "blueprint" in shared and idx < len(shared["blueprint"]):
-            item = shared["blueprint"][idx]
-            return item
-        return None
-
-    def exec(self, item):
-        if not item: return "No item"
-
-        prompt = f"""
-Vai trò: Medical Researcher.
-Topic: {item.get('title')}
-Description: {item.get('description')}
-Tìm kiếm thông tin y khoa chính xác (Mock knowledge).
-
-Output YAML:
-```yaml
-notes: |
-  - Fact 1
-  - Fact 2
-```
-"""
-        try:
-            response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            data = yaml.safe_load(clean)
-            return data.get("notes", "")
-        except:
-            return "No info found."
-
-    def post(self, shared, prep_res, notes):
-        idx = self.params.get("index")
-        if idx is not None:
-            if "research_data" not in shared:
-                shared["research_data"] = {}
-            shared["research_data"][idx] = notes
-        return "default"
-
-class ContentWriterNode(Node):
-    def prep(self, shared):
-        idx = self.params.get("index")
-        if idx is not None:
-            item = shared["blueprint"][idx]
-            notes = shared.get("research_data", {}).get(idx, "")
-            return {"item": item, "notes": notes}
-        return None
-
-    def exec(self, inputs):
-        if not inputs: return {}
-        item = inputs["item"]
-
-        prompt = f"""
-Vai trò: Content Writer.
-Nhiệm vụ: Viết nội dung cho slide dựa trên research.
-Slide Title: "{item.get('title')}"
-Research: {inputs['notes']}
-
-Output YAML:
-```yaml
-slide:
-  title: "{item.get('title')}"
-  content:
-    - Point 1
-    - Point 2
-  speaker_notes: "..."
-```
-"""
-        try:
-            response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            return yaml.safe_load(clean)
-        except:
-            return {"slide": {"title": item.get('title', 'Unknown'), "content": ["Error"], "speaker_notes": ""}}
-
-    def post(self, shared, prep_res, exec_res):
-        idx = self.params.get("index")
-        if idx is not None:
-            if "slides_data" not in shared:
-                shared["slides_data"] = {}
-            # Ensure exec_res is a dict and has 'slide'
-            if isinstance(exec_res, dict) and "slide" in exec_res:
-                shared["slides_data"][idx] = exec_res["slide"]
-            else:
-                shared["slides_data"][idx] = {"title": "Error", "content": [], "speaker_notes": ""}
-        return "default"
-
-class PPTGeneratorNode(Node):
-    def prep(self, shared):
-        data = shared.get("slides_data", {})
-        # Sort by index keys to ensure order
-        sorted_keys = sorted(data.keys())
-        sorted_slides = [data[k] for k in sorted_keys]
-
         reqs = shared.get("requirements", {})
-        topic = reqs.get("topic", "presentation") if reqs else "presentation"
-        return {"slides": sorted_slides, "topic": topic}
+        outline = shared.get("plan_outline", "")
+        artifacts = reqs.get("artifacts", [])
 
-    def exec(self, inputs):
-        from utils.ppt_gen import generate_ppt
-        import os
+        # Ensure list
+        if not isinstance(artifacts, list):
+            artifacts = [artifacts] if artifacts else []
 
-        os.makedirs("output", exist_ok=True)
-        filename = f"output/{inputs['topic'].replace(' ', '_')}.pptx"
+        tasks = []
+        for art in artifacts:
+            tasks.append({
+                "type": art,
+                "outline": outline,
+                "requirements": reqs
+            })
+        return tasks
 
+    def exec(self, task):
+        art_type = task["type"]
+        outline = task["outline"]
+        reqs = task["requirements"]
+
+        prompt = f"""
+Bạn là Sub-Agent chuyên trách.
+Nhiệm vụ: Tạo tài liệu loại '{art_type}'.
+Chủ đề: {reqs.get('topic')}
+Đối tượng: {reqs.get('audience')}
+Dàn ý chung:
+{outline}
+
+Yêu cầu: Viết nội dung chất lượng cao bằng tiếng Việt.
+Trả về YAML:
+```yaml
+type: "{art_type}"
+content: |
+  ... Nội dung chi tiết ...
+```
+"""
+        res = call_llm(prompt)
+        # Parse result immediately to extract content
+        clean_res = res.replace("```yaml", "").replace("```", "").strip()
         try:
-            generate_ppt(inputs["slides"], filename)
-            return filename
-        except Exception as e:
-            print(f"PPT Generation Error: {e}")
-            return None
+            data = yaml.safe_load(clean_res)
+            return {"type": art_type, "content": data.get("content", res)}
+        except:
+            return {"type": art_type, "content": res}
 
-    def post(self, shared, prep_res, filename):
-        shared["output_file"] = filename
+    def post(self, shared, prep_res, exec_res_list):
+        results = {}
+        for item in exec_res_list:
+            results[item["type"]] = item["content"]
+        shared["generated_content"] = results
         return "default"

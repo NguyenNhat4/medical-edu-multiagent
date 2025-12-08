@@ -2,4 +2,3 @@ pocketflow>=0.0.3
 openai
 PyYAML
 streamlit
-python-pptx
