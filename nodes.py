@@ -1,6 +1,7 @@
 from pocketflow import Node, BatchNode
 from utils.call_llm import call_llm
 from utils.tool_registry import get_tools, call_tool
+from utils.yaml_utils import parse_yaml_robustly
 import yaml
 import os
 
@@ -83,15 +84,11 @@ IMPORTANT:
     def post(self, shared, prep_res, exec_res):
         """Extract decision from YAML and save to shared context"""
         try:
-            if "```yaml" in exec_res:
-                yaml_str = exec_res.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in exec_res:
-                yaml_str = exec_res.split("```")[1].split("```")[0].strip()
-            else:
-                yaml_str = exec_res.strip()
-
-            decision = yaml.safe_load(yaml_str)
+            decision = parse_yaml_robustly(exec_res)
             
+            if not decision:
+                raise ValueError("Failed to parse YAML decision")
+
             shared["tool_name"] = decision["tool"]
             shared["parameters"] = decision["parameters"]
             shared["thinking"] = decision.get("thinking", "")
@@ -124,46 +121,60 @@ class ExecuteToolNode(Node):
 
 class InterviewerNode(Node):
     def prep(self, shared):
-        return shared.get("chat_history", [])
+        # We need both history and current known requirements
+        return shared.get("chat_history", []), shared.get("requirements", {})
 
-    def exec(self, history):
+    def exec(self, inputs):
+        history, reqs = inputs
+
         history_text = ""
         for msg in history:
             role = "User" if msg['role'] == "user" else "Agent"
             history_text += f"{role}: {msg['content']}\n"
 
+        # Format current requirements as YAML for context
+        reqs_text = yaml.dump(reqs, default_flow_style=False, allow_unicode=True) if reqs else "Chưa có thông tin."
+
         prompt = f"""
 Bạn là Trợ lý Y khoa (Medical Agent).
-Nhiệm vụ: Hỏi để làm rõ yêu cầu về: Chủ đề (Topic), Đối tượng (Audience), Mục tiêu (Objectives).
-Nếu ĐÃ ĐỦ thông tin: status='done'.
-Nếu CHƯA ĐỦ: status='ask', đặt câu hỏi ngắn gọn.
+Nhiệm vụ: Thu thập thông tin từ người dùng để xây dựng bài giảng.
+Cần 3 thông tin quan trọng:
+1. Chủ đề (Topic)
+2. Đối tượng (Audience)
+3. Mục tiêu (Objectives)
 
-Hội thoại:
+Trạng thái hiện tại (Thông tin đã biết):
+{reqs_text}
+
+Lịch sử hội thoại:
 {history_text}
 
-Output YAML:
+HÃY SUY NGHĨ:
+- Nếu thiếu thông tin nào -> Hỏi thông tin đó.
+- Nếu người dùng thay đổi ý định -> Cập nhật thông tin mới.
+- Nếu đã đủ 3 thông tin -> Xác nhận (done).
+
+OUTPUT FORMAT (YAML):
+Vui lòng trả về YAML trong block code. Luôn luôn quote (ngoặc kép) các giá trị string để tránh lỗi parse.
+
 ```yaml
-status: ask  # or done
-message: "..."
+status: "ask"  # hoặc "done"
+message: "Câu hỏi tiếp theo hoặc xác nhận..."
 requirements:
-  topic: "..."
-  audience: "..."
-  objectives: "..."
+  topic: "..."      # Giữ nguyên hoặc cập nhật
+  audience: "..."   # Giữ nguyên hoặc cập nhật
+  objectives: "..." # Giữ nguyên hoặc cập nhật
 ```
 """
         try:
             response = call_llm(prompt)
-            # Basic cleaning
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-
-            return yaml.safe_load(clean)
+            result = parse_yaml_robustly(response)
+            if not result:
+                raise ValueError("Failed to parse YAML")
+            return result
         except Exception as e:
             print(f"Error parsing YAML: {e}")
+            print(f"Raw Response: {response}")
             return {"status": "ask", "message": "Có lỗi xử lý, vui lòng nhắc lại."}
 
     def post(self, shared, prep_res, exec_res):
@@ -208,6 +219,8 @@ Dàn ý hiện tại:
 Yêu cầu chỉnh sửa: "{feedback}"
 
 Output YAML list mới (Cập nhật hoàn chỉnh):
+Important: Quote strings.
+
 ```yaml
 blueprint:
   - title: "..."
@@ -221,7 +234,7 @@ Topic: {reqs.get('topic')}
 Audience: {reqs.get('audience')}
 Objectives: {reqs.get('objectives')}
 
-Output YAML list:
+Output YAML list. Important: Quote strings.
 ```yaml
 blueprint:
   - title: "..."
@@ -232,15 +245,13 @@ blueprint:
 """
         try:
             response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            return yaml.safe_load(clean)
+            result = parse_yaml_robustly(response)
+            if not result:
+                raise ValueError("Failed to parse YAML")
+            return result
         except Exception as e:
             print(f"Error parsing YAML: {e}")
+            print(f"Raw Response: {response}")
             return {"blueprint": []}
 
     def post(self, shared, prep_res, exec_res):
@@ -276,14 +287,10 @@ notes: |
 """
         try:
             response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            data = yaml.safe_load(clean)
-            return data.get("notes", "")
+            data = parse_yaml_robustly(response)
+            if data and isinstance(data, dict):
+                return data.get("notes", "")
+            return "No info found."
         except:
             return "No info found."
 
@@ -317,7 +324,7 @@ Yêu cầu:
 - Trình bày mạch lạc.
 - Định dạng output YAML phải chính xác.
 
-Output YAML:
+Output YAML. Important: Quote strings.
 ```yaml
 section:
   title: "{item.get('title')}"
@@ -330,16 +337,12 @@ section:
 """
         try:
             response = call_llm(prompt)
-            if "```yaml" in response:
-                clean = response.split("```yaml")[1].split("```")[0].strip()
-            elif "```" in response:
-                 clean = response.split("```")[1].split("```")[0].strip()
-            else:
-                clean = response.strip()
-            result = yaml.safe_load(clean)
+            result = parse_yaml_robustly(response)
             if isinstance(result, dict) and "section" in result:
                 return result["section"]
             else:
+                # Fallback: try to construct minimal section
+                print("Content Writer: Failed to parse section, using default error.")
                 return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
         except Exception as e:
             print(f"Content Generation Error: {e}")
