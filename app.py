@@ -98,6 +98,21 @@ elif st.session_state.stage == "plan":
             desc = st.text_area("Mô tả / Nội dung", item.get('description'), key=f"desc_{i}")
             new_blueprint.append({"title": title, "description": desc})
 
+    st.write("---")
+    st.subheader("🛠️ Chỉnh sửa bằng AI")
+    feedback = st.text_area("Nhập yêu cầu chỉnh sửa...", key="planner_feedback_input")
+    if st.button("✨ Sửa dàn ý"):
+        if feedback.strip():
+            with st.spinner("Đang cập nhật dàn ý..."):
+                st.session_state.shared["blueprint"] = new_blueprint
+                st.session_state.shared["planner_feedback"] = feedback
+
+                planner = PlannerNode()
+                planner.run(st.session_state.shared)
+                st.rerun()
+        else:
+            st.warning("Vui lòng nhập nội dung cần chỉnh sửa.")
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("✅ Xác nhận & Tạo bài giảng", type="primary"):
@@ -108,6 +123,7 @@ elif st.session_state.stage == "plan":
     with col2:
         if st.button("🔄 Lập lại dàn ý"):
             st.session_state.shared["blueprint"] = []
+            st.session_state.shared["planner_feedback"] = ""
             st.rerun()
 
 # --- STAGE 3: EXECUTION ---

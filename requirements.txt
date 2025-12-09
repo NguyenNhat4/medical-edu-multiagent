@@ -5,3 +5,5 @@ streamlit
 python-pptx
 fastmcp
 pyyaml
+google-genai
+python-dotenv
