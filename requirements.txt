@@ -3,3 +3,5 @@ openai
 PyYAML
 streamlit
 python-pptx
+fastmcp
+pyyaml
