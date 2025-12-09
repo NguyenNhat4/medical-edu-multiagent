@@ -324,15 +324,17 @@ Yêu cầu:
 - Trình bày mạch lạc.
 - Định dạng output YAML phải chính xác.
 
-Output YAML. Important: Quote strings.
+Output YAML. Use block scalar (|) for content to handle quotes safely.
 ```yaml
 section:
   title: "{item.get('title')}"
   body:
     - heading: "Overview"
-      content: "..."
+      content: |
+        ...
     - heading: "Details"
-      content: "..."
+      content: |
+        ...
 ```
 """
         try:
@@ -379,7 +381,7 @@ class DocGeneratorNode(Node):
                 if block.get('heading'):
                     call_tool("add_heading", {"text": block['heading'], "level": 2})
                 if block.get('content'):
-                    call_tool("add_paragraph", {"text": block['content']})
+                    call_tool("add_markdown_content", {"markdown_text": block['content']})
 
         # 3. Save
         call_tool("save_document", {})
