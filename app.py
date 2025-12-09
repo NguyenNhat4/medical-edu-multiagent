@@ -1,23 +1,23 @@
 import streamlit as st
 import time
 import os
-from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, PPTGeneratorNode
+from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, DocGeneratorNode
 
 # Page Config
-st.set_page_config(page_title="Trợ lý Bài giảng Y khoa", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", layout="wide")
 
 # Session State Init
 if "stage" not in st.session_state:
     st.session_state.stage = "interview" # interview, plan, executing, done
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn bài giảng về chủ đề gì?"}]
+    st.session_state.messages = [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}]
 if "shared" not in st.session_state:
     st.session_state.shared = {
-        "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn bài giảng về chủ đề gì?"}],
+        "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}],
         "requirements": {},
         "blueprint": [],
-        "research_data": {},
-        "slides_data": {}
+        "research_data": [],
+        "doc_sections": []
     }
 
 # --- STAGE 1: INTERVIEW ---
@@ -42,9 +42,6 @@ if st.session_state.stage == "interview":
         with st.chat_message("assistant"):
             with st.spinner("Đang suy nghĩ..."):
                 interviewer = InterviewerNode()
-                # Run the node
-                # Note: node.run(shared) returns the action string (e.g., "default")
-                # But inside the node, it updates shared["interview_result"]
                 try:
                     interviewer.run(st.session_state.shared)
                 except Exception as e:
@@ -67,7 +64,7 @@ if st.session_state.stage == "interview":
 
 # --- STAGE 2: PLAN ---
 elif st.session_state.stage == "plan":
-    st.title("📋 Kế hoạch bài giảng (Blueprint)")
+    st.title("📋 Kế hoạch tài liệu (Blueprint)")
 
     reqs = st.session_state.shared.get("requirements", {})
     st.info(f"**Chủ đề:** {reqs.get('topic')}\n\n**Đối tượng:** {reqs.get('audience')}\n\n**Mục tiêu:** {reqs.get('objectives')}")
@@ -80,7 +77,6 @@ elif st.session_state.stage == "plan":
             except Exception as e:
                 st.error(f"Lỗi lập dàn ý: {e}")
 
-            # If blueprint is still empty, retry or show error
             if not st.session_state.shared.get("blueprint"):
                 st.warning("Không tạo được dàn ý. Vui lòng thử lại.")
             else:
@@ -93,7 +89,7 @@ elif st.session_state.stage == "plan":
     new_blueprint = []
     # Use index to make unique keys
     for i, item in enumerate(blueprint):
-        with st.expander(f"Slide {i+1}: {item.get('title')}", expanded=True):
+        with st.expander(f"Section {i+1}: {item.get('title')}", expanded=True):
             title = st.text_input("Tiêu đề", item.get('title'), key=f"title_{i}")
             desc = st.text_area("Mô tả / Nội dung", item.get('description'), key=f"desc_{i}")
             new_blueprint.append({"title": title, "description": desc})
@@ -115,7 +111,7 @@ elif st.session_state.stage == "plan":
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("✅ Xác nhận & Tạo bài giảng", type="primary"):
+        if st.button("✅ Xác nhận & Tạo tài liệu", type="primary"):
             st.session_state.shared["blueprint"] = new_blueprint
             st.session_state.stage = "executing"
             st.rerun()
@@ -130,35 +126,35 @@ elif st.session_state.stage == "plan":
 elif st.session_state.stage == "executing":
     st.title("⚙️ Đang khởi tạo nội dung...")
 
-    blueprint = st.session_state.shared.get("blueprint", [])
-    total_steps = len(blueprint)
-
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    researcher = ResearcherNode()
-    writer = ContentWriterNode()
-
-    # Run Batch
-    for i, item in enumerate(blueprint):
-        status_text.text(f"Đang xử lý Slide {i+1}/{total_steps}: {item['title']}...")
-
+    try:
         # 1. Research
-        researcher.set_params({"index": i})
+        status_text.text("Đang tìm kiếm thông tin (Research)...")
+        researcher = ResearcherNode()
         researcher.run(st.session_state.shared)
+        progress_bar.progress(30)
 
         # 2. Write
-        writer.set_params({"index": i})
+        status_text.text("Đang soạn thảo nội dung (Content Writing)...")
+        writer = ContentWriterNode()
         writer.run(st.session_state.shared)
+        progress_bar.progress(60)
 
-        progress_bar.progress((i + 1) / total_steps)
+        # 3. Doc Generation
+        status_text.text("Đang tạo file DOCX (Doc Generation)...")
+        doc_gen = DocGeneratorNode()
+        doc_gen.run(st.session_state.shared)
+        progress_bar.progress(100)
 
-    status_text.text("Đang tạo file PPTX...")
-    ppt_gen = PPTGeneratorNode()
-    ppt_gen.run(st.session_state.shared)
-
-    st.session_state.stage = "done"
-    st.rerun()
+        st.session_state.stage = "done"
+        st.rerun()
+    except Exception as e:
+        st.error(f"Lỗi trong quá trình thực thi: {e}")
+        st.write(e)
+        if st.button("Thử lại"):
+            st.rerun()
 
 # --- STAGE 4: DONE ---
 elif st.session_state.stage == "done":
@@ -170,20 +166,22 @@ elif st.session_state.stage == "done":
     if filename and os.path.exists(filename):
         with open(filename, "rb") as f:
             st.download_button(
-                label="📥 Tải xuống Slide (.pptx)",
+                label="📥 Tải xuống Tài liệu (.docx)",
                 data=f,
                 file_name=os.path.basename(filename),
-                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
 
     st.write("### Nội dung chi tiết:")
-    slides_data = st.session_state.shared.get("slides_data", {})
-    sorted_keys = sorted(slides_data.keys())
-    for k in sorted_keys:
-        slide = slides_data[k]
-        with st.expander(f"{slide.get('title')}"):
-            st.write(slide.get('content'))
-            st.caption(f"Note: {slide.get('speaker_notes')}")
+    doc_sections = st.session_state.shared.get("doc_sections", [])
+
+    for sec in doc_sections:
+        with st.expander(f"{sec.get('title')}", expanded=True):
+            for block in sec.get('body', []):
+                if block.get('heading'):
+                    st.write(f"**{block.get('heading')}**")
+                if block.get('content'):
+                    st.write(block.get('content'))
 
     if st.button("Làm bài mới"):
         for key in list(st.session_state.keys()):
