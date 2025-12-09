@@ -7,3 +7,4 @@ fastmcp
 pyyaml
 google-genai
 python-dotenv
+python-docx
