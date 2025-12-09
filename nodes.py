@@ -1,17 +1,19 @@
-from pocketflow import Node
+from pocketflow import Node, BatchNode
 from utils.call_llm import call_llm
+from utils.tool_registry import get_tools, call_tool
 import yaml
+import os
 
 class GetToolsNode(Node):
     def prep(self, shared):
         """Initialize and get tools"""
-        # The question is now passed from main via shared
         print("🔍 Getting available tools...")
-        return "simple_server.py"
+        return None
 
-    def exec(self, server_path):
+    def exec(self, _):
         """Retrieve tools from the MCP server"""
-        tools = get_tools(server_path)
+        # Using the new tool registry
+        tools = get_tools()
         return tools
 
     def post(self, shared, prep_res, exec_res):
@@ -39,8 +41,8 @@ class GetToolsNode(Node):
 class DecideToolNode(Node):
     def prep(self, shared):
         """Prepare the prompt for LLM to process the question"""
-        tool_info = shared["tool_info"]
-        question = shared["question"]
+        tool_info = shared.get("tool_info", "No tools available")
+        question = shared.get("question", "")
         
         prompt = f"""
 ### CONTEXT
@@ -81,7 +83,13 @@ IMPORTANT:
     def post(self, shared, prep_res, exec_res):
         """Extract decision from YAML and save to shared context"""
         try:
-            yaml_str = exec_res.split("```yaml")[1].split("```")[0].strip()
+            if "```yaml" in exec_res:
+                yaml_str = exec_res.split("```yaml")[1].split("```")[0].strip()
+            elif "```" in exec_res:
+                yaml_str = exec_res.split("```")[1].split("```")[0].strip()
+            else:
+                yaml_str = exec_res.strip()
+
             decision = yaml.safe_load(yaml_str)
             
             shared["tool_name"] = decision["tool"]
@@ -106,12 +114,14 @@ class ExecuteToolNode(Node):
         """Execute the chosen tool"""
         tool_name, parameters = inputs
         print(f"🔧 Executing tool '{tool_name}' with parameters: {parameters}")
-        result = call_tool("simple_server.py", tool_name, parameters)
+        # Using the new tool registry
+        result = call_tool(tool_name, parameters)
         return result
 
     def post(self, shared, prep_res, exec_res):
         print(f"\n✅ Final Answer: {exec_res}")
         return "done"
+
 class InterviewerNode(Node):
     def prep(self, shared):
         return shared.get("chat_history", [])
@@ -134,7 +144,8 @@ Hội thoại:
 Output YAML:
 ```yaml
 status: ask  # or done
-message: "..."
+message: |
+  ...
 requirements:
   topic: "..."
   audience: "..."
@@ -201,7 +212,8 @@ Output YAML list mới (Cập nhật hoàn chỉnh):
 ```yaml
 blueprint:
   - title: "..."
-    description: "..."
+    description: |
+      ...
 ```
 """
         else:
@@ -215,9 +227,11 @@ Output YAML list:
 ```yaml
 blueprint:
   - title: "..."
-    description: "..."
+    description: |
+      ...
   - title: "..."
-    description: "..."
+    description: |
+      ...
 ```
 """
         try:
@@ -240,16 +254,16 @@ blueprint:
             shared["blueprint"] = []
         return "default"
 
-class ResearcherNode(Node):
+class ResearcherNode(BatchNode):
     def prep(self, shared):
-        idx = self.params.get("index")
-        if idx is not None and "blueprint" in shared and idx < len(shared["blueprint"]):
-            item = shared["blueprint"][idx]
-            return item
-        return None
+        # BatchNode expects an iterable. We iterate over blueprint items.
+        return shared.get("blueprint", [])
 
     def exec(self, item):
         if not item: return "No item"
+
+        # Check if we already have research for this item to save cost/time?
+        # For now, just research.
 
         prompt = f"""
 Vai trò: Medical Researcher.
@@ -277,41 +291,47 @@ notes: |
         except:
             return "No info found."
 
-    def post(self, shared, prep_res, notes):
-        idx = self.params.get("index")
-        if idx is not None:
-            if "research_data" not in shared:
-                shared["research_data"] = {}
-            shared["research_data"][idx] = notes
+    def post(self, shared, prep_res, exec_res_list):
+        # exec_res_list is a list of results corresponding to input list.
+        # We store them in a way that matches blueprint order.
+        shared["research_data"] = exec_res_list
         return "default"
 
-class ContentWriterNode(Node):
+class ContentWriterNode(BatchNode):
     def prep(self, shared):
-        idx = self.params.get("index")
-        if idx is not None:
-            item = shared["blueprint"][idx]
-            notes = shared.get("research_data", {}).get(idx, "")
-            return {"item": item, "notes": notes}
-        return None
+        blueprint = shared.get("blueprint", [])
+        research = shared.get("research_data", [])
+
+        # Ensure they are same length. If not, zip truncates, which is fine for now.
+        return list(zip(blueprint, research))
 
     def exec(self, inputs):
-        if not inputs: return {}
-        item = inputs["item"]
+        # inputs is (item, notes)
+        item, notes = inputs
 
         prompt = f"""
-Vai trò: Content Writer.
-Nhiệm vụ: Viết nội dung cho slide dựa trên research.
-Slide Title: "{item.get('title')}"
-Research: {inputs['notes']}
+Vai trò: Medical Content Writer.
+Nhiệm vụ: Viết nội dung chi tiết cho một phần trong tài liệu bài giảng, dựa trên thông tin research.
+Section Title: "{item.get('title')}"
+Description: "{item.get('description')}"
+Research Info: {notes}
+
+Yêu cầu:
+- Nội dung chuyên sâu, chính xác.
+- Trình bày mạch lạc.
+- Định dạng output YAML phải chính xác.
 
 Output YAML:
 ```yaml
-slide:
+section:
   title: "{item.get('title')}"
-  content:
-    - Point 1
-    - Point 2
-  speaker_notes: "..."
+  body:
+    - heading: "Overview"
+      content: |
+        ...
+    - heading: "Details"
+      content: |
+        ...
 ```
 """
         try:
@@ -322,47 +342,64 @@ slide:
                  clean = response.split("```")[1].split("```")[0].strip()
             else:
                 clean = response.strip()
-            return yaml.safe_load(clean)
-        except:
-            return {"slide": {"title": item.get('title', 'Unknown'), "content": ["Error"], "speaker_notes": ""}}
-
-    def post(self, shared, prep_res, exec_res):
-        idx = self.params.get("index")
-        if idx is not None:
-            if "slides_data" not in shared:
-                shared["slides_data"] = {}
-            # Ensure exec_res is a dict and has 'slide'
-            if isinstance(exec_res, dict) and "slide" in exec_res:
-                shared["slides_data"][idx] = exec_res["slide"]
+            result = yaml.safe_load(clean)
+            if isinstance(result, dict) and "section" in result:
+                return result["section"]
             else:
-                shared["slides_data"][idx] = {"title": "Error", "content": [], "speaker_notes": ""}
+                return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
+        except Exception as e:
+            print(f"Content Generation Error: {e}")
+            return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
+
+    def post(self, shared, prep_res, exec_res_list):
+        shared["doc_sections"] = exec_res_list
         return "default"
 
-class PPTGeneratorNode(Node):
+class DocGeneratorNode(Node):
     def prep(self, shared):
-        data = shared.get("slides_data", {})
-        # Sort by index keys to ensure order
-        sorted_keys = sorted(data.keys())
-        sorted_slides = [data[k] for k in sorted_keys]
-
-        reqs = shared.get("requirements", {})
-        topic = reqs.get("topic", "presentation") if reqs else "presentation"
-        return {"slides": sorted_slides, "topic": topic}
+        return shared.get("doc_sections", []), shared.get("requirements", {}).get("topic", "document")
 
     def exec(self, inputs):
-        from utils.ppt_gen import generate_ppt
-        import os
+        sections, topic = inputs
+        # Create output directory
+        output_dir = "output"
+        os.makedirs(output_dir, exist_ok=True)
 
-        os.makedirs("output", exist_ok=True)
-        filename = f"output/{inputs['topic'].replace(' ', '_')}.pptx"
+        filename = f"{output_dir}/{topic.replace(' ', '_')}.docx"
+        filename = os.path.abspath(filename)
 
-        try:
-            generate_ppt(inputs["slides"], filename)
-            return filename
-        except Exception as e:
-            print(f"PPT Generation Error: {e}")
-            return None
+        print(f"📄 Generating document: {filename}")
+
+        # 1. Create Doc
+        call_tool("create_document", {"file_path": filename})
+
+        # 2. Add Content
+        for sec in sections:
+            # Add Section Title (Heading 1)
+            call_tool("add_heading", {"text": sec['title'], "level": 1})
+
+            for block in sec.get('body', []):
+                if block.get('heading'):
+                    call_tool("add_heading", {"text": block['heading'], "level": 2})
+                if block.get('content'):
+                    call_tool("add_paragraph", {"text": block['content']})
+
+        # 3. Save
+        call_tool("save_document", {})
+
+        return filename
 
     def post(self, shared, prep_res, filename):
         shared["output_file"] = filename
+        print(f"✅ Document generated at: {filename}")
+        return "default"
+
+class PPTGeneratorNode(Node):
+    # Left here for backward compatibility or future use
+    def prep(self, shared):
+        # ... (Old logic, might not work with new data structure)
+        return None
+    def exec(self, _):
+        return None
+    def post(self, shared, prep_res, exec_res):
         return "default"
