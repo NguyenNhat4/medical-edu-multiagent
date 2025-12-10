@@ -23,32 +23,25 @@
 
 ### High-Level Flow
 
-1.  **Interviewer**: Proactively asks questions until it has a clear `(Topic, Audience, ArtifactsNeeded)`.
-2.  **Planner**: Summarizes the requirements and proposes an **Outline**.
-3.  **Refiner**: User reviews the outline.
-    - If "Change": Loop back to Planner (or Interviewer).
-    - If "OK": Proceed.
-4.  **Dispatcher (Batch)**: Takes the list of `ArtifactsNeeded` (e.g., `['slide', 'note']`) and runs the Generator for each.
-5.  **Generator**: Generates the content for the specific artifact.
+1.  **Interviewer**: Proactively asks questions until it has a clear `(Topic, Audience, Objectives)`.
+2.  **Planner**: Creates a Blueprint (Outline) based on requirements and iterates with user feedback.
+3.  **Researcher (Batch)**: For each item in the blueprint, searches/retrieves relevant medical knowledge.
+4.  **ContentWriter (Batch)**: For each item, writes detailed content based on research notes.
+5.  **DocGenerator**: Compiles the written sections into a Word document (DOCX) with professional formatting.
 
 ```mermaid
 flowchart TD
     Start --> Interviewer
     Interviewer --> Planner
-    Planner --> Refiner
-    Refiner -->|Change| Interviewer
-    Refiner -->|Approved| Dispatcher
+    Planner -->|Feedback| Planner
+    Planner -->|Approved| Researcher
 
-    subgraph Execution [Parallel Generation]
-        Dispatcher -->|Task: Lecture| GenLecture[Generate Lecture]
-        Dispatcher -->|Task: Slide| GenSlide[Generate Slide]
-        Dispatcher -->|Task: Note| GenNote[Generate Note]
+    subgraph ContentCreation [Batch Process]
+        Researcher --> ContentWriter
     end
 
-    GenLecture --> Finalize
-    GenSlide --> Finalize
-    GenNote --> Finalize
-    Finalize --> End
+    ContentWriter --> DocGenerator
+    DocGenerator --> End
 ```
 
 *(Note: In PocketFlow, "Parallel" is implemented via `BatchNode` iterating over a list of tasks).*
@@ -60,21 +53,31 @@ flowchart TD
     - *Output*: response (str)
     - Used by all nodes.
 
+2.  **MCP Server** (`utils/mcp_server.py` & `utils/tool_registry.py`)
+    - *Purpose*: Provides tools for document manipulation via Model Context Protocol.
+    - *Key Tools*:
+        - `create_document`: Initialize a DOCX file.
+        - `add_markdown_content`: Converts Markdown (Heading `#`, Bold `**`, Lists `*`) to native Word styles.
+        - `save_document`: Saves the file.
+
 ## Data Design
 
 ### Shared Store
 
 ```python
 shared = {
-    "conversation_history": [],  # List of {role, content}
+    "chat_history": [],          # List of {role, content}
     "requirements": {            # Extracted structured data
-        "topic": None,
-        "audience": None,
-        "goals": None,
-        "artifacts": []          # e.g. ["lecture", "slides", "quiz"]
+        "topic": "...",
+        "audience": "...",
+        "objectives": "..."
     },
-    "plan_outline": None,        # The proposed outline text
-    "generated_content": {}      # Key: artifact_type, Value: content string
+    "blueprint": [               # List of items for generation
+        {"title": "...", "description": "..."}
+    ],
+    "research_data": [],         # List of research notes (corresponds to blueprint)
+    "doc_sections": [],          # List of generated content sections
+    "output_file": "path/to/file.docx"
 }
 ```
 
@@ -82,32 +85,33 @@ shared = {
 
 1.  **InterviewerNode**
     - *Type*: Regular
-    - *Purpose*: Chat with user to fill `requirements`.
-    - *Logic*:
-        - Check `shared["requirements"]`.
-        - If missing info (Topic, Audience, Artifact List), generate a question.
-        - If user answers, update `requirements`.
-        - If all info present, move to Planner.
+    - *Purpose*: Chat with user to fill `requirements` (Topic, Audience, Objectives).
 
 2.  **PlannerNode**
     - *Type*: Regular
-    - *Purpose*: Generate a detailed Outline based on `requirements`.
-    - *Post*: Store `plan_outline`.
+    - *Purpose*: Generate or Refine a detailed Blueprint (Outline) based on `requirements` and user feedback.
+    - *Output*: List of blueprint items (title, description).
 
-3.  **RefinerNode**
-    - *Type*: Regular
-    - *Purpose*: Present Plan to user. Ask for confirmation.
-    - *Logic*:
-        - Display Plan.
-        - Get User Input.
-        - If "ok", return "approve".
-        - If "modify", update `requirements` or `plan_outline` and return "revise".
-
-4.  **ArtifactBatchNode** (The Dispatcher)
+3.  **ResearcherNode**
     - *Type*: BatchNode
-    - *Prep*: Read `requirements["artifacts"]`. Return list of task dicts: `[{"type": "lecture"}, {"type": "slides"}]`.
-    - *Exec*: Call `call_llm` with a specialized prompt for that artifact type + the `plan_outline`.
-    - *Post*: Store results in `generated_content`.
+    - *Prep*: Iterates over the blueprint items.
+    - *Exec*: Generates/Finds "notes" or facts for each slide/section.
+    - *Post*: Stores `research_data`.
+
+4.  **ContentWriterNode**
+    - *Type*: BatchNode
+    - *Prep*: Zips `blueprint` + `research_data`.
+    - *Exec*: Generates detailed content section in YAML format.
+        - *Note*: Uses block scalars (`|`) for text to handle quotes safely.
+    - *Post*: Stores `doc_sections`.
+
+5.  **DocGeneratorNode**
+    - *Type*: Regular
+    - *Exec*:
+        - Creates a new DOCX file.
+        - Iterates through `doc_sections`.
+        - Calls `add_markdown_content` (MCP tool) to add formatted text (Headings, Bold, Lists).
+        - Saves the document.
 
 ## Implementation Strategy
 - Use `pocketflow` strictly.
