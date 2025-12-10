@@ -1266,7 +1266,83 @@ def edit_section_by_keyword(ctx: Context, keyword: str, new_content: list, secti
         traceback.print_exc()  # Print detailed error information
         return error_msg
 
-# Add more tools...
+def _process_bold_text(paragraph, text):
+    """Helper to process **bold** text within a paragraph"""
+    parts = text.split('**')
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            if part: paragraph.add_run(part)
+        else:
+            if part:
+                run = paragraph.add_run(part)
+                run.bold = True
+
+@mcp.tool()
+def add_markdown_content(ctx: Context, markdown_text: str) -> str:
+    """
+    Add content with Markdown formatting (headings, bold, lists).
+    Supported: # Heading, **Bold**, * List, - List
+    """
+    try:
+        if not processor.current_document:
+            return "No document is open"
+
+        doc = processor.current_document
+        lines = markdown_text.split('\n')
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Headings
+            if stripped.startswith('#'):
+                level = 0
+                for char in stripped:
+                    if char == '#': level += 1
+                    else: break
+                text = stripped[level:].strip()
+                doc.add_heading(text, level=min(level, 9))
+                continue
+
+            # Lists
+            is_list = stripped.startswith('* ') or stripped.startswith('- ')
+            if is_list:
+                # Calculate indentation level (approx 2 spaces per level)
+                indent = len(line) - len(line.lstrip())
+                level = 1 + (indent // 2)
+                text = stripped[2:].strip()
+
+                style_name = 'List Bullet'
+                if level > 1:
+                    style_name = f'List Bullet {level}'
+
+                try:
+                    # Try to use the specific level style
+                    p = doc.add_paragraph(style=style_name)
+                except:
+                    # Fallback to basic bullet and manual indent
+                    try:
+                        p = doc.add_paragraph(style='List Bullet')
+                        p.paragraph_format.left_indent = Inches(0.25 * (level - 1))
+                    except:
+                         # Fallback to normal paragraph
+                         p = doc.add_paragraph()
+                         p.paragraph_format.left_indent = Inches(0.25 * level)
+                         text = "• " + text
+
+                _process_bold_text(p, text)
+                continue
+
+            # Normal Paragraph
+            p = doc.add_paragraph()
+            _process_bold_text(p, stripped)
+
+        return "Markdown content added"
+    except Exception as e:
+        error_msg = f"Failed to add markdown: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 if __name__ == "__main__":
     # Always start with a clean state, don't try to load any previous document
