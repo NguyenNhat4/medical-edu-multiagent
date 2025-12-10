@@ -35,11 +35,11 @@ flowchart TD
     Interviewer --> Planner
     Planner -->|Feedback| Planner
     Planner -->|Approved| Researcher
-
+    
     subgraph ContentCreation [Batch Process]
         Researcher --> ContentWriter
     end
-
+    
     ContentWriter --> DocGenerator
     DocGenerator --> End
 ```
