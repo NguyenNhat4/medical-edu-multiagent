@@ -1,10 +1,7 @@
 import re
 import logging
 from typing import List, Dict, Any, Optional, Tuple
-
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import AzureOpenAIEmbeddings, AzureChatOpenAI
+from utils.call_llm import call_llm
 
 class ContentProcessor:
     """
@@ -13,13 +10,9 @@ class ContentProcessor:
     def __init__(self, config):
         """
         Initialize the response generator.
-        
-        Args:
-            llm: Large language model for image summarization
         """
         self.logger = logging.getLogger(__name__)
-        self.summarizer_model = config.rag.summarizer_model     # temperature 0.5
-        self.chunker_model = config.rag.chunker_model     # temperature 0.0
+        # Config models are no longer used, using call_llm directly
     
     def summarize_images(self, images: List[str]) -> List[str]:
         """
@@ -40,27 +33,12 @@ class ContentProcessor:
                         Only summarize what is present in the image, without adding any extra detail or comment.
                         Summarize the image only if it is related to the context, return 'non-informative' explicitly 
                         if the image is of some button not relevant to the context."""
-
-        messages = [
-            (
-                "user",
-                [
-                    {"type": "text", "text": prompt_template},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": "{image}"},
-                    },
-                ],
-            )
-        ]
-
-        prompt = ChatPromptTemplate.from_messages(messages)
-        summary_chain = prompt | self.summarizer_model | StrOutputParser()
         
         results = []
         for image in images:
             try:
-                summary = summary_chain.invoke({"image": image})
+                # Call LLM with the image
+                summary = call_llm(prompt_template, image_paths=[image])
                 results.append(summary)
             except Exception as e:
                 # Log the error if needed
@@ -132,7 +110,6 @@ class ContentProcessor:
         
         Args:
             formatted_document: Formatted document text
-            model: AzureChatOpenAI model instance (will create one if not provided)
             
         Returns:
             List of document chunks
@@ -172,7 +149,7 @@ class ContentProcessor:
         """.strip()
         
         formatted_chunking_prompt = CHUNKING_PROMPT.format(document_text=chunked_text)
-        chunking_response = self.chunker_model.invoke(formatted_chunking_prompt).content
+        chunking_response = call_llm(formatted_chunking_prompt)
         
         return self._split_text_by_llm_suggestions(chunked_text, chunking_response)
     
