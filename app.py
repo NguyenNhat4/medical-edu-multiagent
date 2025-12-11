@@ -3,6 +3,9 @@ import time
 import os
 import asyncio
 from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, DocGeneratorNode
+from utils.app_config import AppConfig
+from rag_agent import MedicalRAG
+from web_search_processor_agent.web_search_agent import WebSearchAgent
 
 # Page Config
 st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", layout="wide")
@@ -12,14 +15,22 @@ if "stage" not in st.session_state:
     st.session_state.stage = "interview" # interview, plan, executing, done
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}]
+
 if "shared" not in st.session_state:
-    st.session_state.shared = {
-        "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}],
-        "requirements": {},
-        "blueprint": [],
-        "research_data": [],
-        "doc_sections": []
-    }
+    with st.spinner("Đang khởi tạo hệ thống..."):
+        config = AppConfig()
+        rag_agent = MedicalRAG(config)
+        web_search_agent = WebSearchAgent(config)
+
+        st.session_state.shared = {
+            "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}],
+            "requirements": {},
+            "blueprint": [],
+            "research_data": [],
+            "doc_sections": [],
+            "rag_agent": rag_agent,
+            "web_search_agent": web_search_agent
+        }
 
 # --- STAGE 1: INTERVIEW ---
 if st.session_state.stage == "interview":
@@ -132,13 +143,13 @@ elif st.session_state.stage == "executing":
 
     try:
         # 1. Research
-        status_text.text("Đang tìm kiếm thông tin (Research)...")
+        status_text.text("Đang tìm kiếm thông tin & Xây dựng Knowledge Base (Search & Ingest)...")
         researcher = ResearcherNode()
         researcher.run(st.session_state.shared)
         progress_bar.progress(30)
 
         # 2. Write
-        status_text.text("Đang soạn thảo nội dung (Content Writing)...")
+        status_text.text("Đang soạn thảo nội dung (Retrieval & Content Writing)...")
         writer = ContentWriterNode()
         # Use asyncio.run for async node in synchronous Streamlit app
         try:
@@ -159,6 +170,8 @@ elif st.session_state.stage == "executing":
     except Exception as e:
         st.error(f"Lỗi trong quá trình thực thi: {e}")
         st.write(e)
+        import traceback
+        st.write(traceback.format_exc())
         if st.button("Thử lại"):
             st.rerun()
 

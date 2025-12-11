@@ -158,6 +158,35 @@ class MedicalRAG:
                 "error": str(e),
                 "processing_time": time.time() - start_time
             }
+
+    def ingest_text_chunks(self, chunks: List[str], metadata_path: str = "Ingested Text") -> Dict[str, Any]:
+        """
+        Ingest text chunks directly into the RAG system.
+
+        Args:
+            chunks: List of text chunks
+            metadata_path: Path metadata (e.g. source description)
+        """
+        start_time = time.time()
+        self.logger.info(f"Ingesting {len(chunks)} text chunks.")
+
+        try:
+            self.vector_store.create_vectorstore(
+                document_chunks=chunks,
+                document_path=metadata_path
+            )
+            return {
+                "success": True,
+                "chunks_processed": len(chunks),
+                "processing_time": time.time() - start_time
+            }
+        except Exception as e:
+            self.logger.error(f"Error ingesting text chunks: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "processing_time": time.time() - start_time
+            }
         
     def process_query(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """

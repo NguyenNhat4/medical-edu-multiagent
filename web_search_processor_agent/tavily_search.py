@@ -1,6 +1,6 @@
 import requests
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 class TavilySearchAgent:
     """
@@ -12,12 +12,12 @@ class TavilySearchAgent:
         """
         pass
 
-    def search_tavily(self, query: str) -> str:
-        """Perform a general web search using Tavily API."""
-
+    def search_tavily_raw(self, query: str) -> List[Dict[str, Any]]:
+        """Perform a general web search using Tavily API and return list of results."""
         tavily_api_key = os.environ.get("TAVILY_API_KEY")
         if not tavily_api_key:
-            return "Error: TAVILY_API_KEY not found in environment variables."
+            print("Error: TAVILY_API_KEY not found in environment variables.")
+            return []
 
         # Strip any surrounding quotes from the query for robustness
         query = query.strip('"\'')
@@ -34,13 +34,17 @@ class TavilySearchAgent:
             response.raise_for_status()
             data = response.json()
 
-            results = data.get("results", [])
-
-            if results:
-                return "\n".join(["title: " + str(res.get("title", "")) + " - " +
-                                  "url: " + str(res.get("url", "")) + " - " +
-                                  "content: " + str(res.get("content", "")) + " - " +
-                                  "score: " + str(res.get("score", "")) for res in results])
-            return "No relevant results found."
+            return data.get("results", [])
         except Exception as e:
-            return f"Error retrieving web search results: {e}"
+            print(f"Error retrieving web search results: {e}")
+            return []
+
+    def search_tavily(self, query: str) -> str:
+        """Perform a general web search using Tavily API and return formatted string."""
+        results = self.search_tavily_raw(query)
+        if results:
+            return "\n".join(["title: " + str(res.get("title", "")) + " - " +
+                              "url: " + str(res.get("url", "")) + " - " +
+                              "content: " + str(res.get("content", "")) + " - " +
+                              "score: " + str(res.get("score", "")) for res in results])
+        return "No relevant results found."

@@ -1,5 +1,5 @@
 import requests
-from typing import Dict
+from typing import Dict, List, Any
 
 from .pubmed_search import PubmedSearchAgent
 from .tavily_search import TavilySearchAgent
@@ -26,3 +26,17 @@ class WebSearchAgent:
         
         return f"Tavily Results:\n{tavily_results}\n"
         # \nPubMed Results:\n{pubmed_results}"
+
+    def search_raw(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Perform search and return list of results.
+        """
+        results = []
+        # Tavily
+        tavily = self.tavily_search_agent.search_tavily_raw(query)
+        results.extend(tavily)
+
+        # Pubmed (if enabled)
+        # ...
+
+        return results
