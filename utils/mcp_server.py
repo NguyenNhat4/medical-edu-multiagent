@@ -1344,6 +1344,82 @@ def add_markdown_content(ctx: Context, markdown_text: str) -> str:
         logger.error(error_msg)
         return error_msg
 
+@mcp.tool()
+def set_document_styles(ctx: Context, heading1_size: int = 15, normal_size: int = 13, font_name: str = "Times New Roman") -> str:
+    """
+    Set default document styles (Normal, Heading 1, etc.) to specified font and size.
+    """
+    try:
+        if not processor.current_document:
+            return "No document is open"
+
+        doc = processor.current_document
+
+        # Helper to set font
+        def set_font(style, name, size_pt):
+            style.font.name = name
+            style.font.size = Pt(size_pt)
+            style.element.rPr.rFonts.set(qn('w:ascii'), name)
+            style.element.rPr.rFonts.set(qn('w:hAnsi'), name)
+            style.element.rPr.rFonts.set(qn('w:eastAsia'), name)
+
+        # Normal
+        if 'Normal' in doc.styles:
+            set_font(doc.styles['Normal'], font_name, normal_size)
+
+        # Headings
+        for i in range(1, 10):
+            style_name = f'Heading {i}'
+            if style_name in doc.styles:
+                # User asked: "big section front is 15 and everything else 13"
+                # Interpreted: Heading 1 = 15, others = 13
+                size = heading1_size if i == 1 else normal_size
+                set_font(doc.styles[style_name], font_name, size)
+
+        return f"Styles updated: Normal={normal_size}pt, Heading 1={heading1_size}pt, Font={font_name}"
+    except Exception as e:
+        error_msg = f"Failed to set styles: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+@mcp.tool()
+def add_table_of_contents(ctx: Context) -> str:
+    """
+    Add a Table of Contents (TOC) field code at the current position.
+    Note: User needs to update field in Word to see page numbers.
+    """
+    try:
+        if not processor.current_document:
+            return "No document is open"
+
+        doc = processor.current_document
+
+        paragraph = doc.add_paragraph()
+        run = paragraph.add_run()
+
+        fldChar = OxmlElement('w:fldChar')
+        fldChar.set(qn('w:fldCharType'), 'begin')
+        run._r.append(fldChar)
+
+        instrText = OxmlElement('w:instrText')
+        instrText.set(qn('xml:space'), 'preserve')
+        instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
+        run._r.append(instrText)
+
+        fldChar = OxmlElement('w:fldChar')
+        fldChar.set(qn('w:fldCharType'), 'separate')
+        run._r.append(fldChar)
+
+        fldChar = OxmlElement('w:fldChar')
+        fldChar.set(qn('w:fldCharType'), 'end')
+        run._r.append(fldChar)
+
+        return "Table of Contents field added"
+    except Exception as e:
+        error_msg = f"Failed to add TOC: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
 if __name__ == "__main__":
     # Always start with a clean state, don't try to load any previous document
     if os.path.exists(CURRENT_DOC_FILE):
