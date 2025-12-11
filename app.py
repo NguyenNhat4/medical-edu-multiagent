@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import os
+import asyncio
 from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, DocGeneratorNode
 
 # Page Config
@@ -139,7 +140,12 @@ elif st.session_state.stage == "executing":
         # 2. Write
         status_text.text("Đang soạn thảo nội dung (Content Writing)...")
         writer = ContentWriterNode()
-        writer.run(st.session_state.shared)
+        # Use asyncio.run for async node in synchronous Streamlit app
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_until_complete(writer.run_async(st.session_state.shared))
+        except RuntimeError:
+            asyncio.run(writer.run_async(st.session_state.shared))
         progress_bar.progress(60)
 
         # 3. Doc Generation

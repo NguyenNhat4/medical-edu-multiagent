@@ -1,9 +1,10 @@
-from pocketflow import Node, BatchNode
+from pocketflow import Node, BatchNode, AsyncParallelBatchNode
 from utils.call_llm import call_llm
 from utils.tool_registry import get_tools, call_tool
 from utils.yaml_utils import parse_yaml_robustly
 import yaml
 import os
+import asyncio
 
 class GetToolsNode(Node):
     def prep(self, shared):
@@ -300,15 +301,15 @@ notes: |
         shared["research_data"] = exec_res_list
         return "default"
 
-class ContentWriterNode(BatchNode):
-    def prep(self, shared):
+class ContentWriterNode(AsyncParallelBatchNode):
+    async def prep_async(self, shared):
         blueprint = shared.get("blueprint", [])
         research = shared.get("research_data", [])
 
         # Ensure they are same length. If not, zip truncates, which is fine for now.
         return list(zip(blueprint, research))
 
-    def exec(self, inputs):
+    async def exec_async(self, inputs):
         # inputs is (item, notes)
         item, notes = inputs
 
@@ -338,7 +339,8 @@ section:
 ```
 """
         try:
-            response = call_llm(prompt)
+            # call_llm is sync, so we wrap it in asyncio.to_thread to run it in a thread pool
+            response = await asyncio.to_thread(call_llm, prompt)
             result = parse_yaml_robustly(response)
             if isinstance(result, dict) and "section" in result:
                 return result["section"]
@@ -350,7 +352,7 @@ section:
             print(f"Content Generation Error: {e}")
             return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
 
-    def post(self, shared, prep_res, exec_res_list):
+    async def post_async(self, shared, prep_res, exec_res_list):
         shared["doc_sections"] = exec_res_list
         return "default"
 
@@ -372,18 +374,32 @@ class DocGeneratorNode(Node):
         # 1. Create Doc
         call_tool("create_document", {"file_path": filename})
 
-        # 2. Add Content
-        for sec in sections:
-            # Add Section Title (Heading 1)
-            call_tool("add_heading", {"text": sec['title'], "level": 1})
+        # 2. Set Styles (Times New Roman, Heading 1=15, Normal=13)
+        call_tool("set_document_styles", {
+            "font_name": "Times New Roman",
+            "heading1_size": 15,
+            "normal_size": 13
+        })
 
-            for block in sec.get('body', []):
+        # 3. Add TOC
+        call_tool("add_table_of_contents", {})
+        call_tool("add_page_break", {})
+
+        # 4. Add Content with Hierarchy Numbering (e.g., 1. Title, 1.1. Subheading)
+        for i, sec in enumerate(sections, 1):
+            # Main section numbering: "1. Title"
+            title = f"{i}. {sec['title']}"
+            call_tool("add_heading", {"text": title, "level": 1})
+
+            for j, block in enumerate(sec.get('body', []), 1):
                 if block.get('heading'):
-                    call_tool("add_heading", {"text": block['heading'], "level": 2})
+                    # Sub section numbering: "1.1. SubTitle"
+                    sub_title = f"{i}.{j}. {block['heading']}"
+                    call_tool("add_heading", {"text": sub_title, "level": 2})
                 if block.get('content'):
                     call_tool("add_markdown_content", {"markdown_text": block['content']})
 
-        # 3. Save
+        # 5. Save
         call_tool("save_document", {})
 
         return filename
