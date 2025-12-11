@@ -2,6 +2,7 @@ import os
 from .web_search_agent import WebSearchAgent
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
+from utils.call_llm import call_llm
 
 load_dotenv()
 
@@ -12,9 +13,6 @@ class WebSearchProcessor:
     
     def __init__(self, config):
         self.web_search_agent = WebSearchAgent(config)
-        
-        # Initialize LLM for processing web search results
-        self.llm = config.web_search.llm
     
     def _build_prompt_for_web_search(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
@@ -52,11 +50,13 @@ class WebSearchProcessor:
         # print(f"[WebSearchProcessor] Fetching web search results for: {query}")
         web_search_query_prompt = self._build_prompt_for_web_search(query=query, chat_history=chat_history)
         # print("Web Search Query Prompt:", web_search_query_prompt)
-        web_search_query = self.llm.invoke(web_search_query_prompt)
+
+        web_search_query = call_llm(web_search_query_prompt)
         # print("Web Search Query:", web_search_query)
         
         # Retrieve web search results
-        web_results = self.web_search_agent.search(web_search_query.content)
+        # call_llm returns a string, so we use it directly
+        web_results = self.web_search_agent.search(web_search_query)
 
         # print(f"[WebSearchProcessor] Fetched results: {web_results}")
         
@@ -69,6 +69,6 @@ class WebSearchProcessor:
         )
         
         # Invoke the LLM to process the results
-        response = self.llm.invoke(llm_prompt)
+        response = call_llm(llm_prompt)
         
         return response

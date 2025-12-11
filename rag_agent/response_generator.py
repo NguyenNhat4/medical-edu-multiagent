@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional, Union
+from utils.call_llm import call_llm
 
 class ResponseGenerator:
     """
@@ -11,10 +12,9 @@ class ResponseGenerator:
         
         Args:
             config: Configuration object
-            llm: Large language model for response generation
         """
         self.logger = logging.getLogger(__name__)
-        self.response_generator_model = config.rag.response_generator_model
+        # self.response_generator_model = config.rag.response_generator_model # Removed
         self.include_sources = getattr(config.rag, "include_sources", True)
 
     def _build_prompt(
@@ -116,7 +116,7 @@ class ResponseGenerator:
             prompt = self._build_prompt(query, context, chat_history)
             
             # Generate response
-            response = self.response_generator_model.invoke(prompt)
+            response_text = call_llm(prompt)
             
             # Extract sources for citation
             sources = self._extract_sources(retrieved_docs) if hasattr(self, 'include_sources') and self.include_sources else []
@@ -126,13 +126,13 @@ class ResponseGenerator:
 
             # Add sources to response
             if hasattr(self, 'include_sources') and self.include_sources:
-                response_with_source = response.content + "\n\n##### Source documents:"
+                response_with_source = response_text + "\n\n##### Source documents:"
                 for current_source in sources:
                     source_path = current_source['path']
                     source_title = current_source['title']
                     response_with_source += f"\n- [{source_title}]({source_path})"
             else:
-                response_with_source = response.content
+                response_with_source = response_text
             
             # Add picture paths to response
             response_with_source_and_picture_paths = response_with_source + "\n\n##### Reference images:"

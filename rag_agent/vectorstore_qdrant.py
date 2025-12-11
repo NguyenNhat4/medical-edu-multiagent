@@ -1,34 +1,24 @@
 import os
-import re
 import logging
 from uuid import uuid4
-from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
-from langchain_core.documents import Document
-from langchain.storage import InMemoryStore, LocalFileStore
-from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient, models
-from qdrant_client.http.models import Distance, SparseVectorParams, VectorParams, OptimizersConfigDiff
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from utils.get_embedding import get_embedding
 
 class VectorStore:
     """
-    Create vector store, ingest documents, retrieve relevant documents
+    Create vector store, ingest documents, retrieve relevant documents using pure Qdrant (in-memory).
     """
     def __init__(self, config):
         self.logger = logging.getLogger(__name__)
         self.collection_name = config.rag.collection_name
         self.embedding_dim = config.rag.embedding_dim
-        self.distance_metric = config.rag.distance_metric
-        self.embedding_model = config.rag.embedding_model
         self.retrieval_top_k = config.rag.top_k
-        self.vector_search_type = config.rag.vector_search_type
-        self.vectorstore_local_path = config.rag.vector_local_path
-        self.docstore_local_path = config.rag.doc_local_path
 
-        # Use the singleton client instead of creating a new one
-        # self.client = QdrantClientManager.get_client(config)
-        self.client = QdrantClient(path=self.vectorstore_local_path)
+        # In-memory Qdrant client
+        self.client = QdrantClient(":memory:")
 
     def _does_collection_exist(self) -> bool:
         """Check if the collection already exists in Qdrant."""
@@ -41,172 +31,126 @@ class VectorStore:
             return False
 
     def _create_collection(self):
-        """Create a new collection with dense and sparse vectors."""
+        """Create a new collection with dense vectors."""
         try:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config={"dense": VectorParams(size=self.embedding_dim, distance=Distance.COSINE)},
-                sparse_vectors_config={
-                    "sparse": SparseVectorParams(index=models.SparseIndexParams(on_disk=False))
-                },
+                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE),
             )
             self.logger.info(f"Created new collection: {self.collection_name}")
         except Exception as e:
             self.logger.error(f"Error creating collection: {e}")
             raise e
             
-    def load_vectorstore(self) -> Tuple[QdrantVectorStore, LocalFileStore]:
+    def load_vectorstore(self):
         """
-        Load existing vectorstore and docstore for retrieval operations without ingesting new documents.
-        
-        Returns:
-            Tuple containing (vectorstore, docstore)
+        Check if vectorstore is ready.
+        For in-memory, this just verifies the collection exists (if created).
         """
         # Check if collection exists
         if not self._does_collection_exist():
-            self.logger.error(f"Collection {self.collection_name} does not exist. Please ingest documents first.")
-            raise ValueError(f"Collection {self.collection_name} does not exist")
+            self.logger.warning(f"Collection {self.collection_name} does not exist. Please ingest documents first.")
+            # We don't raise error here, just return None, caller handles logic
+            return None
             
-        # Setup sparse embeddings
-        sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-        
-        # Initialize vector store
-        qdrant_vectorstore = QdrantVectorStore(
-            client=self.client,
-            collection_name=self.collection_name,
-            embedding=self.embedding_model,
-            sparse_embedding=sparse_embeddings,
-            retrieval_mode=RetrievalMode.HYBRID,
-            vector_name="dense",
-            sparse_vector_name="sparse",
-        )
-        
-        # Document storage
-        docstore = LocalFileStore(self.docstore_local_path)
-        
-        self.logger.info(f"Successfully loaded existing vectorstore and docstore")
-        return qdrant_vectorstore, docstore
+        self.logger.info(f"Vectorstore (in-memory) is ready")
+        return None
 
     def create_vectorstore(
             self,
             document_chunks: List[str],
             document_path: str,
-        ) -> Tuple[QdrantVectorStore, LocalFileStore, List[str]]:
+        ) -> None:
         """
-        Create a vector store from document chunks or upsert documents to existing store.
+        Ingest documents into Qdrant store.
         
         Args:
             document_chunks: List of document chunks
             document_path: Path to the original document
-            
-        Returns:
-            Tuple containing (vectorstore, docstore, doc_ids)
         """
         
-        # Generate unique IDs for each chunk
-        doc_ids = [str(uuid4()) for _ in range(len(document_chunks))]
-        
-        # Create langchain documents
-        langchain_documents = []
-        for id_idx, chunk in enumerate(document_chunks):
-            langchain_documents.append(
-                Document(
-                    page_content=chunk,
-                    metadata={
-                        "source": os.path.basename(document_path),
-                        "doc_id": doc_ids[id_idx],
-                        # "source_path": Path(os.path.abspath(document_path)).as_uri()
-                        "source_path": os.path.join("http://localhost:8000/", document_path)
-                    }
-                )
-            )
-        
-        # Setup sparse embeddings
-        sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-        
+        if not document_chunks:
+            return
+
         # Check if collection exists, create if it doesn't
-        collection_exists = self._does_collection_exist()
-        if not collection_exists:
+        if not self._does_collection_exist():
             self._create_collection()
-            self.logger.info(f"Created new collection: {self.collection_name}")
-        else:
-            self.logger.info(f"Collection {self.collection_name} already exists, will upsert documents")
         
-        # Initialize vector store
-        qdrant_vectorstore = QdrantVectorStore(
-            client=self.client,
-            collection_name=self.collection_name,
-            embedding=self.embedding_model,
-            sparse_embedding=sparse_embeddings,
-            retrieval_mode=RetrievalMode.HYBRID,
-            vector_name="dense",
-            sparse_vector_name="sparse",
-        )
-        
-        # Document storage for parent documents
-        docstore = LocalFileStore(self.docstore_local_path)
-        
-        # Ingest documents into vector and doc stores
-        qdrant_vectorstore.add_documents(documents=langchain_documents, ids=doc_ids)
-        
-        # Encode string chunks to bytes before storing
-        encoded_chunks = [chunk.encode('utf-8') for chunk in document_chunks]
-        docstore.mset(list(zip(doc_ids, encoded_chunks)))
+        # Generate embeddings
+        try:
+            embeddings = get_embedding(document_chunks)
+        except Exception as e:
+            self.logger.error(f"Failed to generate embeddings: {e}")
+            return
+
+        points = []
+        for i, chunk in enumerate(document_chunks):
+            doc_id = str(uuid4())
+            vector = embeddings[i]
+
+            payload = {
+                "content": chunk,
+                "source": os.path.basename(document_path),
+                "source_path": os.path.join("http://localhost:8000/", document_path),
+                "doc_id": doc_id
+            }
+
+            points.append(PointStruct(id=doc_id, vector=vector, payload=payload))
+
+        # Upsert
+        try:
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
+            self.logger.info(f"Ingested {len(points)} chunks into {self.collection_name}")
+        except Exception as e:
+            self.logger.error(f"Error upserting points: {e}")
 
     def retrieve_relevant_chunks(
             self,
             query: str,
-            vectorstore: QdrantVectorStore,
-            docstore: LocalFileStore,
-        ) -> Tuple[List[Dict[str, Any]], List[str]]:
+            # vectorstore and docstore args removed as they are internal now
+            vectorstore: Any = None,
+            docstore: Any = None,
+        ) -> List[Dict[str, Any]]:
         """
         Retrieve relevant chunks based on a query.
         
         Args:
             query: User query
-            vectorstore: Vector store containing embeddings
-            docstore: Document store containing actual content
             
         Returns:
-            Tuple containing (retrieved_docs, picture_reference_paths)
-            where retrieved_docs is a list of dictionaries with content and score
+            List of dictionaries with content and score
         """
-        # Use similarity_search_with_score to get documents and scores
-        results = vectorstore.similarity_search_with_score(
-            query=query,
-            k=self.retrieval_top_k
-        )
+        # Generate query embedding
+        query_vector = get_embedding(query)
+
+        if not query_vector:
+             self.logger.error("Failed to generate query embedding")
+             return []
+
+        try:
+            search_result = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=self.retrieval_top_k
+            )
+        except Exception as e:
+            self.logger.error(f"Error searching Qdrant: {e}")
+            return []
         
         retrieved_docs = []
-        # picture_reference_paths = []
         
-        for chunk, score in results:
-            # Get full document from doc store as bytes and decode to string
-            doc_content_bytes = docstore.mget([chunk.metadata['doc_id']])[0]
-            doc_content = doc_content_bytes.decode('utf-8')
-            
-            # Add metadata to the document
-            # formatted_doc = f"{doc_content}\nFollowing are the 'filename' and 'path as uri' of the source document for the current chunk: {chunk.metadata['source']}, {chunk.metadata['source_path']}"
-            formatted_doc = doc_content
-            
-            # Create document dict in the format expected by reranker
-            doc_dict = {
-                "id": chunk.metadata['doc_id'],
-                "content": formatted_doc,
-                "score": score,  # Use the actual similarity score
-                "source": chunk.metadata['source'],
-                "source_path": chunk.metadata['source_path'],
+        for scored_point in search_result:
+            payload = scored_point.payload
+            doc = {
+                "id": scored_point.id,
+                "content": payload.get("content"),
+                "score": scored_point.score,
+                "source": payload.get("source"),
+                "source_path": payload.get("source_path")
             }
-            retrieved_docs.append(doc_dict)
+            retrieved_docs.append(doc)
             
-            # # Extract picture references
-            # matches = re.finditer(r"picture_counter_(\d+)", doc_content)
-            # for match in matches:
-            #     counter_value = int(match.group(1))
-            #     # Create picture path based on document source and counter
-            #     doc_basename = os.path.splitext(chunk.metadata['source'])[0]  # Remove file extension
-            #     picture_path = Path(os.path.abspath(parsed_content_dir + "/" + f"{doc_basename}-picture-{counter_value}.png")).as_uri()
-            #     picture_reference_paths.append(picture_path)
-        
-        # return retrieved_docs, picture_reference_paths
         return retrieved_docs
