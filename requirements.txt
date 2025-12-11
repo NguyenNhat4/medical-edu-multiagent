@@ -11,3 +11,4 @@ python-docx
 fastembed
 qdrant-client
 sentence-transformers
+docling
