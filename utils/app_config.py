@@ -17,6 +17,7 @@ class AppConfig:
             self.fastembed_cache_dir = "fastembed_cache"
 
             self.include_sources = True
+            self.reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
             self.reranker_top_k = 3
 
     class WebSearchConfig:

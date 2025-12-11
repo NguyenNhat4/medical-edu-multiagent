@@ -2,7 +2,6 @@ import os
 import logging
 from uuid import uuid4
 from typing import List, Dict, Any, Tuple, Optional
-import numpy as np
 
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.models import (
