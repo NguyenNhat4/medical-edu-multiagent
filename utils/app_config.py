@@ -15,7 +15,7 @@ class AppConfig:
 
     class WebSearchConfig:
         def __init__(self):
-            self.pubmed_api_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            self.pubmed_base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
     def __init__(self):
         self.rag = self.RAGConfig()
