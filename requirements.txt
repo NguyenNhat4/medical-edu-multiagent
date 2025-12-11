@@ -8,3 +8,6 @@ pyyaml
 google-genai
 python-dotenv
 python-docx
+fastembed
+qdrant-client
+sentence-transformers

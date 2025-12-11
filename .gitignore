@@ -58,6 +58,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+fastembed_cache/
 
 # Compiled files
 *.com
@@ -89,4 +90,4 @@ coverage/
 .eslintcache
 
 # Optional REPL history
-.node_repl_history 
+.node_repl_history
