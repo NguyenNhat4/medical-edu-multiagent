@@ -19,6 +19,7 @@ class AppConfig:
             self.include_sources = True
             self.reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
             self.reranker_top_k = 3
+            self.reranker_model = "pritamdeka/S-PubMedBert-MS-MARCO"
 
     class WebSearchConfig:
         def __init__(self):
