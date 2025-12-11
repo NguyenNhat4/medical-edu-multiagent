@@ -264,71 +264,91 @@ blueprint:
 
 class ResearcherNode(BatchNode):
     def prep(self, shared):
-        # BatchNode expects an iterable. We iterate over blueprint items.
+        self.rag_agent = shared.get("rag_agent")
+        self.web_search_agent = shared.get("web_search_agent")
         return shared.get("blueprint", [])
 
     def exec(self, item):
         if not item: return "No item"
 
-        # Check if we already have research for this item to save cost/time?
-        # For now, just research.
-
+        # 1. Generate Query
         prompt = f"""
-Vai trò: Medical Researcher.
-Topic: {item.get('title')}
+Generate a specific, high-quality search query to find detailed medical information for the following section of a document.
+Section Title: {item.get('title')}
 Description: {item.get('description')}
-Tìm kiếm thông tin y khoa chính xác (Mock knowledge).
 
-Output YAML:
-```yaml
-notes: |
-  - Fact 1
-  - Fact 2
-```
+Return ONLY the query string, no quotes.
 """
         try:
-            response = call_llm(prompt)
-            data = parse_yaml_robustly(response)
-            if data and isinstance(data, dict):
-                return data.get("notes", "")
-            return "No info found."
-        except:
-            return "No info found."
+            query = call_llm(prompt).strip().strip('"')
+            print(f"🔎 Researching: {query}")
+
+            # 2. Search
+            if self.web_search_agent:
+                results = self.web_search_agent.search_raw(query)
+            else:
+                results = [] # Fallback
+
+            # 3. Ingest
+            chunks = []
+            for res in results:
+                content = res.get('content')
+                if content:
+                    # Format chunk with metadata
+                    chunk_text = f"Source: {res.get('title', 'Web')}\nURL: {res.get('url', '')}\nContent: {content}"
+                    chunks.append(chunk_text)
+
+            if chunks and self.rag_agent:
+                self.rag_agent.ingest_text_chunks(chunks, metadata_path=f"Query: {query}")
+                return f"Ingested {len(chunks)} results."
+        except Exception as e:
+            print(f"Researcher Error: {e}")
+            return "Error in research."
+
+        return "No results."
 
     def post(self, shared, prep_res, exec_res_list):
-        # exec_res_list is a list of results corresponding to input list.
-        # We store them in a way that matches blueprint order.
-        shared["research_data"] = exec_res_list
+        shared["research_log"] = exec_res_list
         return "default"
 
 class ContentWriterNode(AsyncParallelBatchNode):
     async def prep_async(self, shared):
-        blueprint = shared.get("blueprint", [])
-        research = shared.get("research_data", [])
+        self.rag_agent = shared.get("rag_agent")
+        return shared.get("blueprint", [])
 
-        # Ensure they are same length. If not, zip truncates, which is fine for now.
-        return list(zip(blueprint, research))
+    async def exec_async(self, item):
+        title = item.get('title')
+        description = item.get('description')
 
-    async def exec_async(self, inputs):
-        # inputs is (item, notes)
-        item, notes = inputs
+        context = ""
+        if self.rag_agent:
+            # Retrieve relevant chunks
+            query = f"{title} {description}"
+            # Run sync retrieval in thread
+            try:
+                docs = await asyncio.to_thread(self.rag_agent.vector_store.retrieve_relevant_chunks, query)
+                context = "\n\n".join([d.get('content', '') for d in docs])
+                print(f"📚 Retrieved {len(docs)} chunks for '{title}'")
+            except Exception as e:
+                print(f"Retrieval error: {e}")
 
         prompt = f"""
 Vai trò: Medical Content Writer.
-Nhiệm vụ: Viết nội dung chi tiết cho một phần trong tài liệu bài giảng, dựa trên thông tin research.
-Section Title: "{item.get('title')}"
-Description: "{item.get('description')}"
-Research Info: {notes}
+Nhiệm vụ: Viết nội dung chi tiết cho một phần trong tài liệu bài giảng, dựa trên thông tin được cung cấp.
+Section Title: "{title}"
+Description: "{description}"
+Context Info:
+{context}
 
 Yêu cầu:
 - Nội dung chuyên sâu, chính xác.
 - Trình bày mạch lạc.
 - Định dạng output YAML phải chính xác.
 
-Output YAML. Use block scalar (|) for content to handle quotes safely.
+Output YAML. Use block scalar (|) for content.
 ```yaml
 section:
-  title: "{item.get('title')}"
+  title: "{title}"
   body:
     - heading: "Overview"
       content: |
@@ -339,18 +359,15 @@ section:
 ```
 """
         try:
-            # call_llm is sync, so we wrap it in asyncio.to_thread to run it in a thread pool
             response = await asyncio.to_thread(call_llm, prompt)
             result = parse_yaml_robustly(response)
             if isinstance(result, dict) and "section" in result:
                 return result["section"]
             else:
-                # Fallback: try to construct minimal section
-                print("Content Writer: Failed to parse section, using default error.")
-                return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
+                return {"title": title, "body": [{"content": "Error in generation"}]}
         except Exception as e:
             print(f"Content Generation Error: {e}")
-            return {"title": item.get('title'), "body": [{"content": "Error in generation"}]}
+            return {"title": title, "body": [{"content": "Error in generation"}]}
 
     async def post_async(self, shared, prep_res, exec_res_list):
         shared["doc_sections"] = exec_res_list

@@ -110,7 +110,6 @@ class VectorStore:
     def retrieve_relevant_chunks(
             self,
             query: str,
-            # vectorstore and docstore args removed as they are internal now
             vectorstore: Any = None,
             docstore: Any = None,
         ) -> List[Dict[str, Any]]:
@@ -131,11 +130,25 @@ class VectorStore:
              return []
 
         try:
-            search_result = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=self.retrieval_top_k
-            )
+            # Use query_points which is available in newer clients (and :memory: mode)
+            # Fallback to search if query_points not available (though it should be for 1.10+)
+            if hasattr(self.client, 'query_points'):
+                result = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    limit=self.retrieval_top_k
+                )
+                search_result = result.points
+            elif hasattr(self.client, 'search'):
+                search_result = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=self.retrieval_top_k
+                )
+            else:
+                self.logger.error("QdrantClient has neither query_points nor search method.")
+                return []
+
         except Exception as e:
             self.logger.error(f"Error searching Qdrant: {e}")
             return []
