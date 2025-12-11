@@ -145,7 +145,11 @@ elif st.session_state.stage == "executing":
         # 1. Research
         status_text.text("Đang tìm kiếm thông tin & Xây dựng Knowledge Base (Search & Ingest)...")
         researcher = ResearcherNode()
-        researcher.run(st.session_state.shared)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_until_complete(researcher.run_async(st.session_state.shared))
+        except RuntimeError:
+            asyncio.run(researcher.run_async(st.session_state.shared))
         progress_bar.progress(30)
 
         # 2. Write

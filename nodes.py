@@ -262,13 +262,13 @@ blueprint:
             shared["blueprint"] = []
         return "default"
 
-class ResearcherNode(BatchNode):
-    def prep(self, shared):
+class ResearcherNode(AsyncParallelBatchNode):
+    async def prep_async(self, shared):
         self.rag_agent = shared.get("rag_agent")
         self.web_search_agent = shared.get("web_search_agent")
         return shared.get("blueprint", [])
 
-    def exec(self, item):
+    async def exec_async(self, item):
         if not item: return "No item"
 
         # 1. Generate Query
@@ -280,12 +280,13 @@ Description: {item.get('description')}
 Return ONLY the query string, no quotes.
 """
         try:
-            query = call_llm(prompt).strip().strip('"')
+            query = await asyncio.to_thread(call_llm, prompt)
+            query = query.strip().strip('"')
             print(f"🔎 Researching: {query}")
 
             # 2. Search
             if self.web_search_agent:
-                results = self.web_search_agent.search_raw(query)
+                results = await asyncio.to_thread(self.web_search_agent.search_raw, query)
             else:
                 results = [] # Fallback
 
@@ -299,7 +300,7 @@ Return ONLY the query string, no quotes.
                     chunks.append(chunk_text)
 
             if chunks and self.rag_agent:
-                self.rag_agent.ingest_text_chunks(chunks, metadata_path=f"Query: {query}")
+                await asyncio.to_thread(self.rag_agent.ingest_text_chunks, chunks, metadata_path=f"Query: {query}")
                 return f"Ingested {len(chunks)} results."
         except Exception as e:
             print(f"Researcher Error: {e}")
@@ -307,7 +308,7 @@ Return ONLY the query string, no quotes.
 
         return "No results."
 
-    def post(self, shared, prep_res, exec_res_list):
+    async def post_async(self, shared, prep_res, exec_res_list):
         shared["research_log"] = exec_res_list
         return "default"
 
