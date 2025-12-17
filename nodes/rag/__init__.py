@@ -1,4 +1,5 @@
-from .doc_parser_node import DocParserNode, ImageSummarizerNode, DocumentFormatterNode, DocumentChunkerNode
+from .doc_parser_node import DocParserNode
+from .content_processor_node import ImageSummarizerNode, DocumentFormatterNode, DocumentChunkerNode
 from .vectorstore_node import VectorStoreIngestNode, VectorStoreRetrievalNode
 from .query_expander_node import QueryExpanderNode
 from .reranker_node import RerankerNode

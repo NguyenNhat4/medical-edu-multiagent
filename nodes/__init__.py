@@ -18,14 +18,17 @@ from .research import (
 try:
     from .rag import (
         DocParserNode,
-        ImageSummarizerNode,
-        DocumentFormatterNode,
-        DocumentChunkerNode,
         VectorStoreIngestNode,
         VectorStoreRetrievalNode,
         QueryExpanderNode,
         RerankerNode,
         ResponseGeneratorNode
+    )
+    from .rag.content_processor_node import (
+        ImageSummarizerNode,
+        DocumentFormatterNode,
+        DocumentChunkerNode,
+        ContentProcessorNode
     )
     _rag_available = True
 except ImportError as e:
