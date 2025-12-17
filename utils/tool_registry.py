@@ -29,23 +29,57 @@ def get_tools():
         print(f"Error getting tools: {e}")
         return []
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def call_tool_async(tool_name, kwargs):
+    """
+    Asynchronously call a tool from the MCP server.
+    This avoids blocking the event loop when called from async contexts.
+    """
+    try:
+        logger.info(f"Async calling tool: {tool_name} with args keys: {list(kwargs.keys())}")
+        result = await mcp.call_tool(tool_name, arguments=kwargs)
+
+        # result is typically ([Content], Meta)
+        content_list = result[0]
+        texts = []
+        for item in content_list:
+            if hasattr(item, 'text'):
+                texts.append(item.text)
+            else:
+                texts.append(str(item))
+
+        output = "\n".join(texts)
+        logger.info(f"Tool {tool_name} completed successfully.")
+        return output
+    except Exception as e:
+        logger.error(f"Error calling tool {tool_name} asynchronously: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Error: {e}"
+
 def call_tool(tool_name, kwargs):
     """
     Synchronously call a tool from the MCP server.
+    WARNING: Use call_tool_async if running inside an async loop.
     """
     try:
+        logger.info(f"Sync calling tool: {tool_name}")
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
 
         if loop and loop.is_running():
+             logger.warning(f"Detected running event loop for sync tool call: {tool_name}. This often fails.")
+             # This will likely raise RuntimeError: This event loop is already running
              result = loop.run_until_complete(mcp.call_tool(tool_name, arguments=kwargs))
         else:
              result = asyncio.run(mcp.call_tool(tool_name, arguments=kwargs))
 
         # result is typically ([Content], Meta)
-        # Content can be TextContent, ImageContent, etc.
         content_list = result[0]
         texts = []
         for item in content_list:
@@ -56,7 +90,7 @@ def call_tool(tool_name, kwargs):
 
         return "\n".join(texts)
     except Exception as e:
-        print(f"Error calling tool {tool_name}: {e}")
+        logger.error(f"Error calling tool {tool_name}: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return f"Error: {e}"
