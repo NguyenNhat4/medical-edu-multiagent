@@ -87,8 +87,13 @@ Audience: {reqs.get('audience')}
 Objectives: {reqs.get('objectives')}
 
 Tạo dàn ý chi tiết với 5-7 phần chính. Mỗi phần cần:
-- Title: Tiêu đề rõ ràng, súc tích
+- Title: Tiêu đề rõ ràng, súc tích (Tập trung vào nội dung chuyên môn)
 - Description: Mô tả chi tiết nội dung cần trình bày
+
+YÊU CẦU QUAN TRỌNG:
+1. KHÔNG tạo các phần Chào hỏi, Giới thiệu chung chung, Lời kết, Cảm ơn (Ví dụ: "Chào mừng", "Giới thiệu bản thân", "Kết luận chung").
+2. Tập trung thẳng vào các kiến thức cốt lõi (Core Knowledge).
+3. Đảm bảo cấu trúc logic, đi từ cơ bản đến nâng cao.
 
 Output YAML list. Important: Quote strings.
 ```yaml
