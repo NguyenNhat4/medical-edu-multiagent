@@ -2,35 +2,37 @@ import streamlit as st
 import time
 import os
 import asyncio
+import yaml
 from flows.app_flows import create_interview_flow, create_planning_flow, create_execution_flow
-from utils.app_config import AppConfig
-from rag_agent import MedicalRAG
-from web_search_processor_agent.web_search_agent import WebSearchAgent
 
 # Page Config
 st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", layout="wide")
+
+def load_shared_context():
+    """Load the initial shared state from YAML file."""
+    try:
+        with open("shared_context.yaml", "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        st.error("File 'shared_context.yaml' not found!")
+        return {}
 
 # Session State Init
 if "stage" not in st.session_state:
     st.session_state.stage = "interview" # interview, plan, executing, done
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}]
+    st.session_state.messages = []
 
 if "shared" not in st.session_state:
     with st.spinner("Đang khởi tạo hệ thống..."):
-        config = AppConfig()
-        rag_agent = MedicalRAG(config)
-        web_search_agent = WebSearchAgent(config)
+        # Load Initial Shared State from YAML
+        shared_state = load_shared_context()
 
-        st.session_state.shared = {
-            "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}],
-            "requirements": {},
-            "blueprint": [],
-            "research_data": [],
-            "doc_sections": [],
-            "rag_agent": rag_agent,
-            "web_search_agent": web_search_agent
-        }
+        # Initialize UI messages from shared state if present
+        if shared_state.get("chat_history"):
+            st.session_state.messages = list(shared_state["chat_history"])
+
+        st.session_state.shared = shared_state
 
 # --- STAGE 1: INTERVIEW ---
 if st.session_state.stage == "interview":
@@ -55,9 +57,12 @@ if st.session_state.stage == "interview":
             with st.spinner("Đang suy nghĩ..."):
                 interview_flow = create_interview_flow()
                 try:
+                    # Run the flow with the shared state
                     interview_flow.run(st.session_state.shared)
                 except Exception as e:
                     st.error(f"Lỗi hệ thống: {e}")
+                    import traceback
+                    st.write(traceback.format_exc())
                     st.stop()
 
                 result = st.session_state.shared.get("interview_result", {})
