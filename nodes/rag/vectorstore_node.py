@@ -22,42 +22,53 @@ class VectorStoreIngestNode(Node):
     Node for ingesting document chunks into Qdrant vector store.
     Uses Hybrid Search (Dense + Sparse) and Late Interaction Reranking (ColBERT).
     """
-    def __init__(self, config, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.logger = logging.getLogger(__name__)
-        self.collection_name = config.rag.collection_name
-        self.dense_dim = config.rag.embedding_dim
+        self.client = None # Lazy init
+
+    def prep(self, shared):
+        """
+        Read config, client, document chunks and metadata from shared store.
+
+        Returns:
+            Dict containing necessary context
+        """
+        config = shared.get("config", {})
+
+        # Get or Initialize Qdrant Client (Shared across nodes)
+        if "qdrant_client" not in shared:
+             shared["qdrant_client"] = QdrantClient(":memory:")
+        self.client = shared["qdrant_client"]
+
+        self.collection_name = config.get("rag", {}).get("collection_name", "medical_docs")
+        self.dense_dim = config.get("rag", {}).get("embedding_dim", 384)
 
         # Model names (as vector names in Qdrant)
         self.dense_vector_name = "all-MiniLM-L6-v2"
         self.sparse_vector_name = "bm25"
         self.colbert_vector_name = "colbertv2.0"
 
-        # In-memory Qdrant client
-        self.client = QdrantClient(":memory:")
-
-    def prep(self, shared):
-        """
-        Read document chunks and metadata from shared store.
-
-        Returns:
-            Tuple of (document_chunks, document_path)
-        """
         document_chunks = shared.get("document_chunks", [])
         document_path = shared.get("document_path", "Ingested Text")
-        return (document_chunks, document_path)
+
+        return {
+            "chunks": document_chunks,
+            "path": document_path
+        }
 
     def exec(self, prep_res):
         """
         Generate embeddings and create vector store points.
 
         Args:
-            prep_res: Tuple of (document_chunks, document_path)
+            prep_res: Dict with context
 
         Returns:
             List of PointStruct objects ready for ingestion
         """
-        document_chunks, document_path = prep_res
+        document_chunks = prep_res["chunks"]
+        document_path = prep_res["path"]
 
         if not document_chunks:
             return []
@@ -188,22 +199,27 @@ class VectorStoreRetrievalNode(Node):
     """
     Node for retrieving relevant chunks from Qdrant vector store.
     """
-    def __init__(self, config, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.logger = logging.getLogger(__name__)
-        self.collection_name = config.rag.collection_name
-        self.retrieval_top_k = config.rag.top_k
+        self.client = None
+
+    def prep(self, shared):
+        """Read query and config from shared store."""
+        config = shared.get("config", {})
+
+        if "qdrant_client" not in shared:
+             shared["qdrant_client"] = QdrantClient(":memory:")
+        self.client = shared["qdrant_client"]
+
+        self.collection_name = config.get("rag", {}).get("collection_name", "medical_docs")
+        self.retrieval_top_k = config.get("rag", {}).get("top_k", 5)
 
         # Model names (as vector names in Qdrant)
         self.dense_vector_name = "all-MiniLM-L6-v2"
         self.sparse_vector_name = "bm25"
         self.colbert_vector_name = "colbertv2.0"
 
-        # In-memory Qdrant client
-        self.client = QdrantClient(":memory:")
-
-    def prep(self, shared):
-        """Read query from shared store."""
         return shared.get("query", "")
 
     def exec(self, query):

@@ -51,32 +51,19 @@ class ContentWriterNode(AsyncParallelBatchNode):
         Generate content for one blueprint section.
 
         Args:
-            item: Dict with 'title', 'description', and 'query'
+            item: Dict with 'title', 'description', 'query', and optional 'context'
 
         Returns:
             Dict with section title and body
         """
         title = item.get('title', 'Unknown Section')
         description = item.get('description', '')
-        query = item.get('query', f"{title} {description}")
+        # query = item.get('query', f"{title} {description}") # Not needed if context provided
+
+        # Context is now passed in the item (from previous steps in the chain)
+        context = item.get('context', '')
 
         self.logger.info(f"Writing content for: {title}")
-
-        # Retrieve relevant context from RAG
-        context = ""
-        if self.rag_agent:
-            try:
-                docs = await asyncio.to_thread(
-                    self.rag_agent.vector_store.retrieve_relevant_chunks,
-                    query
-                )
-                context = "\n\n".join([d.get('content', '') for d in docs])
-                self.logger.info(f"Retrieved {len(docs)} chunks for '{title}'")
-            except Exception as e:
-                self.logger.error(f"Retrieval error for '{title}': {e}")
-                context = ""
-        else:
-            self.logger.warning("No RAG agent available - generating without context")
 
         # Generate content using LLM
         prompt = f"""

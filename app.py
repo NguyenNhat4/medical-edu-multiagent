@@ -11,7 +11,7 @@ st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", 
 def load_shared_context():
     """Load the initial shared state from YAML file."""
     try:
-        with open("shared_context.yaml", "r") as f:
+        with open("shared_context.yaml", "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
         st.error("File 'shared_context.yaml' not found!")
