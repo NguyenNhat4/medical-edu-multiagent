@@ -2,7 +2,7 @@ import streamlit as st
 import time
 import os
 import asyncio
-from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, DocGeneratorNode
+from flows.app_flows import create_interview_flow, create_planning_flow, create_execution_flow
 from utils.app_config import AppConfig
 from rag_agent import MedicalRAG
 from web_search_processor_agent.web_search_agent import WebSearchAgent
@@ -53,9 +53,9 @@ if st.session_state.stage == "interview":
         # Agent turn
         with st.chat_message("assistant"):
             with st.spinner("Đang suy nghĩ..."):
-                interviewer = InterviewerNode()
+                interview_flow = create_interview_flow()
                 try:
-                    interviewer.run(st.session_state.shared)
+                    interview_flow.run(st.session_state.shared)
                 except Exception as e:
                     st.error(f"Lỗi hệ thống: {e}")
                     st.stop()
@@ -83,9 +83,9 @@ elif st.session_state.stage == "plan":
 
     if not st.session_state.shared.get("blueprint"):
         with st.spinner("Đang lập dàn ý..."):
-            planner = PlannerNode()
+            planning_flow = create_planning_flow()
             try:
-                planner.run(st.session_state.shared)
+                planning_flow.run(st.session_state.shared)
             except Exception as e:
                 st.error(f"Lỗi lập dàn ý: {e}")
 
@@ -115,8 +115,8 @@ elif st.session_state.stage == "plan":
                 st.session_state.shared["blueprint"] = new_blueprint
                 st.session_state.shared["planner_feedback"] = feedback
 
-                planner = PlannerNode()
-                planner.run(st.session_state.shared)
+                planning_flow = create_planning_flow()
+                planning_flow.run(st.session_state.shared)
                 st.rerun()
         else:
             st.warning("Vui lòng nhập nội dung cần chỉnh sửa.")
@@ -142,31 +142,17 @@ elif st.session_state.stage == "executing":
     status_text = st.empty()
 
     try:
-        # 1. Research
-        status_text.text("Đang tìm kiếm thông tin & Xây dựng Knowledge Base (Search & Ingest)...")
-        researcher = ResearcherNode()
+        status_text.text("Đang thực thi quy trình: Research -> Write -> Generate Doc...")
+
+        execution_flow = create_execution_flow()
+
+        # Run the full async flow
         try:
             loop = asyncio.get_running_loop()
-            loop.run_until_complete(researcher.run_async(st.session_state.shared))
+            loop.run_until_complete(execution_flow.run_async(st.session_state.shared))
         except RuntimeError:
-            asyncio.run(researcher.run_async(st.session_state.shared))
-        progress_bar.progress(30)
+            asyncio.run(execution_flow.run_async(st.session_state.shared))
 
-        # 2. Write
-        status_text.text("Đang soạn thảo nội dung (Retrieval & Content Writing)...")
-        writer = ContentWriterNode()
-        # Use asyncio.run for async node in synchronous Streamlit app
-        try:
-            loop = asyncio.get_running_loop()
-            loop.run_until_complete(writer.run_async(st.session_state.shared))
-        except RuntimeError:
-            asyncio.run(writer.run_async(st.session_state.shared))
-        progress_bar.progress(60)
-
-        # 3. Doc Generation
-        status_text.text("Đang tạo file DOCX (Doc Generation)...")
-        doc_gen = DocGeneratorNode()
-        doc_gen.run(st.session_state.shared)
         progress_bar.progress(100)
 
         st.session_state.stage = "done"
