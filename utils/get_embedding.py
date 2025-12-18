@@ -61,6 +61,11 @@ def get_models():
         _models = EmbeddingModels()
     return _models
 
+def set_models(models):
+    """Set the global EmbeddingModels instance (e.g., from cache)."""
+    global _models
+    _models = models
+
 def get_embedding(content: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
     """
     Get dense embedding for backward compatibility.
