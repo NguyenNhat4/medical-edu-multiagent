@@ -457,6 +457,12 @@ class DocGeneratorNode(Node):
             "normal_size": 13
         })
 
+        # Add Title
+        call_tool("add_heading", {"text": topic, "level": 0})
+
+        # Add TOC Heading
+        call_tool("add_heading", {"text": "Mục lục", "level": 1})
+
         # 3. Add TOC
         call_tool("add_table_of_contents", {})
         call_tool("add_page_break", {})
