@@ -265,7 +265,7 @@ blueprint:
 class ResearcherNode(AsyncParallelBatchNode):
     async def prep_async(self, shared):
         self.rag_agent = shared.get("rag_agent")
-        self.web_search_agent = shared.get("web_search_agent")
+        self.web_search_processor_agent = shared.get("web_search_processor_agent")
         return shared.get("blueprint", [])
 
     async def exec_async(self, item):
@@ -284,32 +284,51 @@ Return ONLY the query string, no quotes.
             query = query.strip().strip('"')
             print(f"🔎 Researching: {query}")
 
-            # 2. Search
-            if self.web_search_agent:
-                results = await asyncio.to_thread(self.web_search_agent.search_raw, query)
+            # 2. Search using WebSearchProcessorAgent to get raw results
+            if self.web_search_processor_agent:
+                results = await asyncio.to_thread(
+                    self.web_search_processor_agent.get_raw_search_results,
+                    query
+                )
             else:
                 results = [] # Fallback
 
-            # 3. Ingest
-            chunks = []
-            for res in results:
-                content = res.get('content')
-                if content:
-                    # Format chunk with metadata
-                    chunk_text = f"Source: {res.get('title', 'Web')}\nURL: {res.get('url', '')}\nContent: {content}"
-                    chunks.append(chunk_text)
+            print(f"Query: '{query}' - Found {len(results)} results.")
 
-            if chunks and self.rag_agent:
-                await asyncio.to_thread(self.rag_agent.ingest_text_chunks, chunks, metadata_path=f"Query: {query}")
-                return f"Ingested {len(chunks)} results."
+            # 3. Process and ingest chunks into RAG
+            if results and self.rag_agent:
+                chunks = []
+                for res in results:
+                    content = res.get('content', '')
+                    if content:
+                        # Format chunk with metadata
+                        chunk_text = f"Source: {res.get('title', 'Web Search Result')}\nURL: {res.get('url', 'N/A')}\n\n{content}"
+                        chunks.append(chunk_text)
+
+                if chunks:
+                    # Use MedicalRAG's ingest_text_chunks method
+                    await asyncio.to_thread(
+                        self.rag_agent.ingest_text_chunks,
+                        chunks,
+                        metadata_path=f"Web Search: {query}"
+                    )
+                    return f"✅ Ingested {len(chunks)} chunks from {len(results)} results."
+                else:
+                    return "⚠️ No valid content found in search results."
+            else:
+                return "⚠️ No results found or RAG agent not available."
+
         except Exception as e:
-            print(f"Researcher Error: {e}")
-            return "Error in research."
-
-        return "No results."
+            print(f"❌ Researcher Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error in research: {str(e)}"
 
     async def post_async(self, shared, prep_res, exec_res_list):
         shared["research_log"] = exec_res_list
+        print("\n📊 Research Summary:")
+        for i, log in enumerate(exec_res_list, 1):
+            print(f"  {i}. {log}")
         return "default"
 
 class ContentWriterNode(AsyncParallelBatchNode):
@@ -322,29 +341,57 @@ class ContentWriterNode(AsyncParallelBatchNode):
         description = item.get('description')
 
         context = ""
+        sources = []
+
         if self.rag_agent:
-            # Retrieve relevant chunks
+            # Retrieve relevant chunks using VectorStore's retrieve_relevant_chunks
             query = f"{title} {description}"
             # Run sync retrieval in thread
             try:
-                docs = await asyncio.to_thread(self.rag_agent.vector_store.retrieve_relevant_chunks, query)
-                context = "\n\n".join([d.get('content', '') for d in docs])
-                print(f"📚 Retrieved {len(docs)} chunks for '{title}'")
+                docs = await asyncio.to_thread(
+                    self.rag_agent.vector_store.retrieve_relevant_chunks,
+                    query
+                )
+
+                if docs:
+                    # Format context from retrieved documents
+                    context_parts = []
+                    for i, doc in enumerate(docs, 1):
+                        content = doc.get('content', '')
+                        source = doc.get('source', 'Unknown')
+                        source_path = doc.get('source_path', '')
+                        score = doc.get('score', 0)
+
+                        context_parts.append(f"[Source {i}: {source} (Relevance: {score:.3f})]\n{content}")
+                        sources.append({"source": source, "url": source_path, "score": score})
+
+                    context = "\n\n---\n\n".join(context_parts)
+                    print(f"📚 Retrieved {len(docs)} chunks for '{title}'")
+                else:
+                    print(f"⚠️ No documents retrieved for '{title}'")
+                    context = "No relevant information found in the knowledge base."
+
             except Exception as e:
-                print(f"Retrieval error: {e}")
+                print(f"❌ Retrieval error for '{title}': {e}")
+                import traceback
+                traceback.print_exc()
+                context = "Error retrieving information from knowledge base."
 
         prompt = f"""
 Vai trò: Medical Content Writer.
-Nhiệm vụ: Viết nội dung chi tiết cho một phần trong tài liệu bài giảng, dựa trên thông tin được cung cấp.
+Nhiệm vụ: Viết nội dung chi tiết cho một phần trong tài liệu y khoa dựa trên thông tin được cung cấp.
+
 Section Title: "{title}"
 Description: "{description}"
-Context Info:
+
+Context Info (Retrieved from Knowledge Base):
 {context}
 
 Yêu cầu:
-- Nội dung chuyên sâu, chính xác.
-- Trình bày mạch lạc.
+- Nội dung chuyên sâu, chính xác dựa trên Context Info được cung cấp.
+- Trình bày mạch lạc, văn viết chuyên nghiệp.
 - Định dạng output YAML phải chính xác.
+- Sử dụng thông tin từ Context Info để viết nội dung, trích dẫn nguồn nếu cần.
 
 Output YAML. Use block scalar (|) for content.
 ```yaml
@@ -363,15 +410,26 @@ section:
             response = await asyncio.to_thread(call_llm, prompt)
             result = parse_yaml_robustly(response)
             if isinstance(result, dict) and "section" in result:
-                return result["section"]
+                section = result["section"]
+                # Add sources metadata if available
+                if sources:
+                    section["sources"] = sources
+                return section
             else:
                 return {"title": title, "body": [{"content": "Error in generation"}]}
         except Exception as e:
-            print(f"Content Generation Error: {e}")
-            return {"title": title, "body": [{"content": "Error in generation"}]}
+            print(f"❌ Content Generation Error for '{title}': {e}")
+            import traceback
+            traceback.print_exc()
+            return {"title": title, "body": [{"content": f"Error in generation: {str(e)}"}]}
 
     async def post_async(self, shared, prep_res, exec_res_list):
         shared["doc_sections"] = exec_res_list
+        print("\n📝 Content Writing Summary:")
+        for i, section in enumerate(exec_res_list, 1):
+            title = section.get('title', 'Unknown')
+            body_count = len(section.get('body', []))
+            print(f"  {i}. '{title}' - {body_count} subsections")
         return "default"
 
 class DocGeneratorNode(Node):

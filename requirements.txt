@@ -1,14 +1,11 @@
 pocketflow>=0.0.3
-openai
 PyYAML
 streamlit
 python-pptx
 fastmcp
-pyyaml
-google-genai
 python-dotenv
 python-docx
 fastembed
 qdrant-client
-sentence-transformers
 docling
+google-genai

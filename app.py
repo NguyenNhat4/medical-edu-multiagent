@@ -5,7 +5,7 @@ import asyncio
 from nodes import InterviewerNode, PlannerNode, ResearcherNode, ContentWriterNode, DocGeneratorNode
 from utils.app_config import AppConfig
 from rag_agent import MedicalRAG
-from web_search_processor_agent.web_search_agent import WebSearchAgent
+from web_search_processor_agent import WebSearchProcessorAgent
 
 # Page Config
 st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", layout="wide")
@@ -20,7 +20,7 @@ if "shared" not in st.session_state:
     with st.spinner("Đang khởi tạo hệ thống..."):
         config = AppConfig()
         rag_agent = MedicalRAG(config)
-        web_search_agent = WebSearchAgent(config)
+        web_search_processor_agent = WebSearchProcessorAgent(config)
 
         st.session_state.shared = {
             "chat_history": [{"role": "agent", "content": "Xin chào! Tôi là Trợ lý Y khoa. Bạn cần soạn tài liệu về chủ đề gì?"}],
@@ -29,12 +29,12 @@ if "shared" not in st.session_state:
             "research_data": [],
             "doc_sections": [],
             "rag_agent": rag_agent,
-            "web_search_agent": web_search_agent
+            "web_search_processor_agent": web_search_processor_agent
         }
 
 # --- STAGE 1: INTERVIEW ---
 if st.session_state.stage == "interview":
-    st.title("🏥 Trợ lý Y khoa AI - Thu thập yêu cầu")
+    st.title("Trợ lý Y khoa AI")
 
     # Display Chat
     for msg in st.session_state.messages:
@@ -143,7 +143,7 @@ elif st.session_state.stage == "executing":
 
     try:
         # 1. Research
-        status_text.text("Đang tìm kiếm thông tin & Xây dựng Knowledge Base (Search & Ingest)...")
+        status_text.text("Đang tìm kiếm thông tin (Search & Ingest)...")
         researcher = ResearcherNode()
         try:
             loop = asyncio.get_running_loop()

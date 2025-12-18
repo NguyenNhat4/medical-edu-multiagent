@@ -5,7 +5,7 @@ class AppConfig:
             # Dense embedding dimension for 'all-MiniLM-L6-v2'
             self.embedding_dim = 384
             self.top_k = 5 # Increased slightly for hybrid search
-            self.vector_local_path = ":memory:"
+            self.vector_local_path = "http://localhost:6333/"
             self.doc_local_path = "output/docstore"
             self.parsed_content_dir = "output/parsed_content"
             self.distance_metric = "cosine"
@@ -17,9 +17,9 @@ class AppConfig:
             self.fastembed_cache_dir = "fastembed_cache"
 
             self.include_sources = True
+            # Reranker configuration
             self.reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-            self.reranker_top_k = 3
-            self.reranker_model = "pritamdeka/S-PubMedBert-MS-MARCO"
+            self.reranker_top_k = 10
 
     class WebSearchConfig:
         def __init__(self):

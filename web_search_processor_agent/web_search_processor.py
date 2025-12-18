@@ -43,6 +43,20 @@ class WebSearchProcessor:
 
         return prompt
     
+    def get_raw_search_results(self, query: str) -> List[Dict]:
+        """
+        Fetches raw web search results without LLM processing.
+
+        Args:
+            query: Search query
+
+        Returns:
+            List of search result dictionaries with 'title', 'url', and 'content' keys
+        """
+        # Retrieve raw web search results from both Tavily and PubMed
+        results = self.web_search_agent.search_raw(query)
+        return results
+
     def process_web_results(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> str:
         """
         Fetches web search results, processes them using LLM, and returns a user-friendly response.
@@ -53,13 +67,13 @@ class WebSearchProcessor:
 
         web_search_query = call_llm(web_search_query_prompt)
         # print("Web Search Query:", web_search_query)
-        
+
         # Retrieve web search results
         # call_llm returns a string, so we use it directly
         web_results = self.web_search_agent.search(web_search_query)
 
         # print(f"[WebSearchProcessor] Fetched results: {web_results}")
-        
+
         # Construct prompt to LLM for processing the results
         llm_prompt = (
             "You are an AI assistant specialized in medical information. Below are web search results "
@@ -67,8 +81,8 @@ class WebSearchProcessor:
             "Use reliable sources only and ensure medical accuracy.\n\n"
             f"Query: {query}\n\nWeb Search Results:\n{web_results}\n\nResponse:"
         )
-        
+
         # Invoke the LLM to process the results
         response = call_llm(llm_prompt)
-        
+
         return response

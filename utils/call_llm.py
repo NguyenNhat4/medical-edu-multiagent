@@ -8,7 +8,7 @@ load_dotenv()
 def call_llm(prompt, system_prompt=None, image_paths=None):
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "your-api-key"))
     model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-    
+
     # Gemini API uses system_instruction parameter for system prompts
     config = {"system_instruction": system_prompt} if system_prompt else {}
 

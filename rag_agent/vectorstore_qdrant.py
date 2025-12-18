@@ -34,7 +34,7 @@ class VectorStore:
         self.colbert_vector_name = "colbertv2.0"
 
         # In-memory Qdrant client
-        self.client = QdrantClient(":memory:")
+        self.client = QdrantClient("http://localhost:6333")
 
     def _does_collection_exist(self) -> bool:
         """Check if the collection already exists in Qdrant."""
