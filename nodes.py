@@ -293,7 +293,7 @@ Return ONLY the query string, no quotes.
             else:
                 results = [] # Fallback
 
-            print(f"Query: '{query}' - Found {results} results.")
+            print(f"Query: '{query}' - Found {len(results)} results.")
 
             # 3. Process and ingest chunks into RAG
             if results and self.rag_agent:
