@@ -10,6 +10,19 @@ from web_search_processor_agent import WebSearchProcessorAgent
 # Page Config
 st.set_page_config(page_title="Trợ lý Tài liệu Y khoa", page_icon="🏥", layout="wide")
 
+# --- CACHED RESOURCES ---
+@st.cache_resource
+def load_models_cached():
+    """Load embedding models once and cache them globally."""
+    from utils.get_embedding import EmbeddingModels
+    return EmbeddingModels()
+
+# Load models immediately
+with st.spinner("Đang tải các mô hình AI (lần đầu sẽ mất khoảng 1 phút)..."):
+    models = load_models_cached()
+    from utils.get_embedding import set_models
+    set_models(models)
+
 # Session State Init
 if "stage" not in st.session_state:
     st.session_state.stage = "interview" # interview, plan, executing, done
