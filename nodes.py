@@ -2,6 +2,7 @@ from pocketflow import Node, BatchNode, AsyncParallelBatchNode
 from utils.call_llm import call_llm
 from utils.tool_registry import get_tools, call_tool
 from utils.yaml_utils import parse_yaml_robustly
+from utils.scraper import scrape_url
 import yaml
 import os
 import asyncio
@@ -299,11 +300,32 @@ Return ONLY the query string, no quotes.
             if results and self.rag_agent:
                 chunks = []
                 for res in results:
-                    content = res.get('content', '')
-                    if content:
+                    url = res.get('url')
+                    title = res.get('title', 'Web Search Result')
+                    snippet = res.get('content', '')
+
+                    # Try to scrape full content
+                    full_content = None
+                    if url:
+                        print(f"  ⬇️ Scraping: {url}")
+                        full_content = await asyncio.to_thread(scrape_url, url)
+
+                    # Use full content if available and sufficient, else snippet
+                    content_to_use = full_content if (full_content and len(full_content) > 200) else snippet
+
+                    if content_to_use:
                         # Format chunk with metadata
-                        chunk_text = f"Source: {res.get('title', 'Web Search Result')}\nURL: {res.get('url', 'N/A')}\n\n{content}"
-                        chunks.append(chunk_text)
+                        chunk_text = f"Source: {title}\nURL: {url if url else 'N/A'}\n\n{content_to_use}"
+
+                        # If content is very long, chunk it
+                        if len(content_to_use) > 2000:
+                            # Split into smaller chunks
+                            chunk_size = 1000
+                            sub_chunks = [content_to_use[i:i+chunk_size] for i in range(0, len(content_to_use), chunk_size)]
+                            for sc in sub_chunks:
+                                chunks.append(f"Source: {title}\nURL: {url if url else 'N/A'}\n\n{sc}")
+                        else:
+                            chunks.append(chunk_text)
 
                 if chunks:
                     # Use MedicalRAG's ingest_text_chunks method
@@ -456,6 +478,12 @@ class DocGeneratorNode(Node):
             "heading1_size": 15,
             "normal_size": 13
         })
+
+        # Add Title
+        call_tool("add_heading", {"text": topic, "level": 0})
+
+        # Add TOC Heading
+        call_tool("add_heading", {"text": "Mục lục", "level": 1})
 
         # 3. Add TOC
         call_tool("add_table_of_contents", {})
